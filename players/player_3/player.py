@@ -1,4 +1,4 @@
-"""Group 3: Lagrangian scalarisation (approach A3) over a budget controller (A8).
+"""Group 3: Lagrangian scalarisation over a budget controller.
 
 Every legal action for the day - a wear pair plus a discard subset of the
 leftovers - is scored with one function and the argmin is returned:
@@ -38,9 +38,9 @@ infers the roommates' spend rate from ``total_spent``, banks the shortfall
 against the budget as discard credit, scales lam down to zero as the bank
 fills (a slack constraint has a zero multiplier), and sets lam to a survival
 value once the money is gone so that the cost of a hole dominates any
-mismatch. With lam at infinity and no credit the policy degenerates to A1;
-with lam near zero it is the churn regime (A2). One code path covers the
-whole range.
+mismatch. With lam at infinity and no credit the policy degenerates to
+never-discard wear-levelling; with lam near zero it is the churn regime. One
+code path covers the whole range.
 
 Tuning (5 training seeds, 10 held-out, rosters of 1-4 of us with greedy and
 random roommates, $7,490 and $3,000 over 1,080 days) settled on lam = 3,
@@ -104,7 +104,7 @@ def mismatch(a: int, b: int) -> float:
 
 
 class Player3(BasePlayer):
-	# --- A3 multipliers -------------------------------------------------
+	# --- cost multipliers -----------------------------------------------
 	# Price of one expected new sock when the credit bank is empty, in
 	# embarrassment points per dollar. Scaled down linearly as the bank
 	# fills: a slack budget constraint has a zero multiplier.
@@ -136,7 +136,7 @@ class Player3(BasePlayer):
 	# --- belief -----------------------------------------------------------
 	HISTOGRAM_DECAY = 0.9
 
-	# --- A8 budget controller ----------------------------------------------
+	# --- budget controller -------------------------------------------------
 	MAX_DISCARDS = 2
 	RESERVE_FRACTION = 0.03
 	RESERVE_PACKS = 4
@@ -181,7 +181,7 @@ class Player3(BasePlayer):
 		return Selection(wear=wear, discard=discard)
 
 	# ------------------------------------------------------------------
-	# A3: scalarised enumeration
+	# Scalarised enumeration
 	# ------------------------------------------------------------------
 
 	def _decide(
@@ -337,7 +337,7 @@ class Player3(BasePlayer):
 		return total / weight if weight else float(WEARS_TO_CAP)
 
 	# ------------------------------------------------------------------
-	# A8: budget controller -> (lam, discards allowed today)
+	# Budget controller -> (lam, discards allowed today)
 	# ------------------------------------------------------------------
 
 	def _collapse_expected(self, turn: TurnContext) -> bool:

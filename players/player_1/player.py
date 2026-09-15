@@ -13,10 +13,11 @@ This directory is not itself discovered - the registry only matches
 ``player_<digits>`` - so the template can never appear in a run as a competitor.
 """
 
+from itertools import combinations
+
 from models.player import GameContext, PlayerSnapshot, Selection, TurnContext
 from models.player import Player as BasePlayer
 
-from itertools import combinations
 
 class Player1(BasePlayer):
 	"""Rename me to Player<k>, where <k> is your group number."""
@@ -115,7 +116,8 @@ class Player1(BasePlayer):
 			i, j = black_indices[0], black_indices[1]
 		else:
 			i, j = min(
-				combinations(range(len(offered)), 2), key=lambda p: abs(offered[p[0]] - offered[p[1]])
+				combinations(range(len(offered)), 2),
+				key=lambda p: abs(offered[p[0]] - offered[p[1]]),
 			)
 
 		return Selection(wear=(i, j), discard=())

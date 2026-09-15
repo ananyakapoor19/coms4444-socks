@@ -16,6 +16,7 @@ This directory is not itself discovered - the registry only matches
 from models.player import GameContext, PlayerSnapshot, Selection, TurnContext
 from models.player import Player as BasePlayer
 
+from itertools import combinations
 
 class Player1(BasePlayer):
 	"""Rename me to Player<k>, where <k> is your group number."""
@@ -103,4 +104,18 @@ class Player1(BasePlayer):
 		# Replace everything below with your strategy. This baseline wears the
 		# first two socks it is handed and never discards, which is the
 		# do-nothing behaviour a real strategy should beat.
-		return Selection(wear=(0, 1), discard=())
+		is_white = [int(sock >= 127) for sock in offered]
+		num_white = sum(is_white)
+
+		if num_white == 2:
+			black_indices = []
+			for index, val in enumerate(is_white):
+				if val == 0:
+					black_indices.append(index)
+			i, j = black_indices[0], black_indices[1]
+		else:
+			i, j = min(
+				combinations(range(len(offered)), 2), key=lambda p: abs(offered[p[0]] - offered[p[1]])
+			)
+
+		return Selection(wear=(i, j), discard=())

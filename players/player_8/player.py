@@ -15,6 +15,7 @@ This directory is not itself discovered - the registry only matches
 
 from models.player import GameContext, PlayerSnapshot, Selection, TurnContext
 from models.player import Player as BasePlayer
+from players.player_8.history import SockHistory
 
 
 class Player8(BasePlayer):
@@ -36,6 +37,7 @@ class Player8(BasePlayer):
 		# itself - you cannot preload state into an already-built object. Anything
 		# you want to carry between days lives on self, so initialise it here.
 		self.days_seen = 0
+		self.history = SockHistory()
 
 	def select_socks(self, offered: tuple[int, ...], turn: TurnContext) -> Selection:
 		"""Choose two socks to wear, and decide the fate of the rest.
@@ -99,8 +101,24 @@ class Player8(BasePlayer):
 		other groups.
 		"""
 		self.days_seen += 1
+		self.history.record(day=turn.day, offered=offered)
 
-		# Replace everything below with your strategy. This baseline wears the
-		# first two socks it is handed and never discards, which is the
-		# do-nothing behaviour a real strategy should beat.
-		return Selection(wear=(0, 1), discard=())
+		# Keep wearing the first two socks for now.
+		wear = (0, 1)
+		if turn.budget_remaining == 0:
+			return Selection(wear=wear, discard=())
+
+		discard = []
+		for i in range(len(offered)):
+			if i in wear:
+				continue
+
+			shade = offered[i]
+			if shade <= 64:  # Black sock
+				if shade > 58:
+					discard.append(i)
+			else:  # White sock
+				if shade < 133:
+					discard.append(i)
+
+		return Selection(wear=wear, discard=tuple(discard))

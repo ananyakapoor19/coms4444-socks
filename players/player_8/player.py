@@ -13,6 +13,8 @@ This directory is not itself discovered - the registry only matches
 ``player_<digits>`` - so the template can never appear in a run as a competitor.
 """
 
+from itertools import combinations
+
 from models.player import GameContext, PlayerSnapshot, Selection, TurnContext
 from models.player import Player as BasePlayer
 from players.player_8.history import SockHistory
@@ -103,16 +105,30 @@ class Player8(BasePlayer):
 		self.days_seen += 1
 		self.history.record(day=turn.day, offered=offered)
 
-		# Keep wearing the first two socks for now.
-		wear = (0, 1)
+		# Edge cases
+		# Handle when a pair of socks cannot be made
+		n = len(offered)
+		if n == 0:
+			return Selection(wear=(), discard=())
+		if n == 1:
+			return Selection(wear=(0,), discard=())
+
+		# Finds the index pair of socks that is closest to 6
+		target = 6
+		best_pair = min(
+			combinations(range(n), 2),
+			key=lambda pair: abs(abs(offered[pair[0]] - offered[pair[1]]) - target),
+		)
+
+		# Create an array of the remaining socks for discard method
+		worn = set(best_pair)
+		unworn = [i for i in range(n) if i not in worn]
+
 		if turn.budget_remaining == 0:
-			return Selection(wear=wear, discard=())
+			return Selection(wear=best_pair, discard=())
 
 		discard = []
-		for i in range(len(offered)):
-			if i in wear:
-				continue
-
+		for i in unworn:
 			shade = offered[i]
 			if shade <= 64:  # Black sock
 				if shade > 58:
@@ -121,4 +137,4 @@ class Player8(BasePlayer):
 				if shade < 133:
 					discard.append(i)
 
-		return Selection(wear=wear, discard=tuple(discard))
+		return Selection(wear=best_pair, discard=tuple(discard))

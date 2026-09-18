@@ -142,6 +142,7 @@ class Player2(BasePlayer):
 		min_embarassment = min([p["embarrassment"] for p in pairs])
 
 
+
 		# want to track budget / spending, per day
 		self.budget_per_day.append(turn.budget_remaining)
 

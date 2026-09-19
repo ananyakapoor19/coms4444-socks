@@ -23,6 +23,9 @@ PACK_COST = 10.0
 WHITE_CUTOFF = 200
 ENDGAME_START = 0.8
 ENDGAME_RESERVE = 0.2
+SPEND_RATE_ALPHA = 0.3
+MIN_COMPATIBILITY = 0.02
+MAX_COMPATIBILITY = 0.18
 
 
 class Player6(BasePlayer):
@@ -47,15 +50,15 @@ class Player6(BasePlayer):
 		self.white_hist = [1.0] * BUCKETS
 		self.black_hist = [1.0] * BUCKETS
 		self.estimated_budget = None
+		self.last_spend = 0.0
+		self.last_spend_day = 0
+		self.recent_spend_rate = 0.0
 
 	def _is_black(self, shade: int) -> bool:
 		return shade <= 64
 
 	def _bucket(self, shade: int) -> int:
-		if self._is_black(shade):
-			value = shade / 65
-		else:
-			value = (shade - 127) / 129
+		value = shade / 65 if self._is_black(shade) else (shade - 127) / 129
 		index = int(value * BUCKETS)
 		if index < 0:
 			return 0
@@ -81,23 +84,49 @@ class Player6(BasePlayer):
 		diff = abs(a - b)
 		return 0 if diff <= THRESHOLD else diff
 
-	def _budget_allows_discard(self, turn: TurnContext) -> bool:
+	def _observe_spending(self, turn: TurnContext) -> None:
+		elapsed = turn.day - self.last_spend_day
+		if elapsed > 0:
+			daily_spend = max(0.0, turn.total_spent - self.last_spend) / elapsed
+			if self.last_spend_day == 0:
+				self.recent_spend_rate = daily_spend
+			else:
+				self.recent_spend_rate = (
+					SPEND_RATE_ALPHA * daily_spend
+					+ (1.0 - SPEND_RATE_ALPHA) * self.recent_spend_rate
+				)
+		self.last_spend = turn.total_spent
+		self.last_spend_day = turn.day
+
+	def _discard_aggression(self, turn: TurnContext) -> float:
+		"""Scale discarding by time left and the household's recent spend pace."""
 		if turn.budget_remaining == float('inf'):
-			return True
+			progress = turn.day / self.days if self.days else 1.0
+			return 0.75 + 0.75 * progress
 
 		current_budget = turn.total_spent + turn.budget_remaining
 		if self.estimated_budget is None or current_budget > self.estimated_budget:
 			self.estimated_budget = current_budget
 
-		if turn.budget_remaining < PACK_COST:
-			return False
+		reserve = self.estimated_budget * ENDGAME_RESERVE
+		spendable = turn.budget_remaining - reserve
+		if spendable < PACK_COST:
+			return 0.0
 
 		progress = turn.day / self.days if self.days else 1.0
-		if progress < ENDGAME_START or self.estimated_budget is None:
-			return True
+		days_left = max(1, self.days - turn.day + 1)
+		affordable_rate = spendable / days_left
+		if self.recent_spend_rate <= 0.0:
+			pace_factor = 1.5
+		else:
+			pace_factor = affordable_rate / self.recent_spend_rate
+		pace_factor = min(1.5, max(0.25, pace_factor))
 
-		reserve = self.estimated_budget * ENDGAME_RESERVE
-		return turn.budget_remaining - PACK_COST >= reserve
+		# Time pressure rises smoothly, with an extra push during the final 20%.
+		time_factor = 0.75 + 0.5 * progress
+		if progress >= ENDGAME_START:
+			time_factor += 0.25 * ((progress - ENDGAME_START) / (1.0 - ENDGAME_START))
+		return min(2.0, pace_factor * time_factor)
 
 	def select_socks(self, offered: tuple[int, ...], turn: TurnContext) -> Selection:
 		"""Choose two socks to wear, and decide the fate of the rest.
@@ -162,6 +191,7 @@ class Player6(BasePlayer):
 		"""
 		self.days_seen += 1
 		self._update_histograms(offered)
+		self._observe_spending(turn)
 
 		best_pair = (0, 1)
 		best_key = None
@@ -181,7 +211,13 @@ class Player6(BasePlayer):
 					best_pair = (i, j)
 
 		discard: list[int] = []
-		if self._budget_allows_discard(turn):
+		aggression = self._discard_aggression(turn)
+		if aggression > 0.0:
+			white_cutoff = round(WHITE_CUTOFF + 30 * (aggression - 1.0))
+			compatibility_cutoff = min(
+				MAX_COMPATIBILITY,
+				max(MIN_COMPATIBILITY, 0.08 * aggression),
+			)
 			for i, shade in enumerate(offered):
 				if i in best_pair:
 					continue
@@ -189,9 +225,9 @@ class Player6(BasePlayer):
 				compatibility = self._compatibility(shade)
 				black = self._is_black(shade)
 				worn_out = shade == 64 if black else shade == 127
-				white_too_old = not black and shade < WHITE_CUTOFF
+				white_too_old = not black and shade < white_cutoff
 
-				if worn_out or white_too_old or compatibility < 0.08:
+				if worn_out or white_too_old or compatibility < compatibility_cutoff:
 					discard.append(i)
 
 		return Selection(wear=best_pair, discard=tuple(discard))

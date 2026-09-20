@@ -1,6 +1,6 @@
 """Group 2 player: distribution-aware sock selection.
 
-The policy has three parts, each described in ``plan.md`` at the repo root and
+The policy has three parts, each described in ``plan.md`` and
 in ``POLICY_CHANGES.md`` next to this file:
 
 1. Track the shade distribution of the socks we have seen, per colour, over a

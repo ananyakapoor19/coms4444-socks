@@ -13,11 +13,13 @@ This directory is not itself discovered - the registry only matches
 ``player_<digits>`` - so the template can never appear in a run as a competitor.
 """
 
+from itertools import combinations
+
 from models.player import GameContext, PlayerSnapshot, Selection, TurnContext
 from models.player import Player as BasePlayer
 
 
-class PlayerTemplate(BasePlayer):
+class Player9(BasePlayer):
 	"""Rename me to Player<k>, where <k> is your group number."""
 
 	def __init__(self, snapshot: PlayerSnapshot, ctx: GameContext) -> None:
@@ -103,4 +105,18 @@ class PlayerTemplate(BasePlayer):
 		# Replace everything below with your strategy. This baseline wears the
 		# first two socks it is handed and never discards, which is the
 		# do-nothing behaviour a real strategy should beat.
-		return Selection(wear=(0, 1), discard=())
+
+		left, right = min(
+			combinations(range(len(offered)), 2), key=lambda p: abs(offered[p[0]] - offered[p[1]])
+		)
+
+		dis = []
+
+		for i in range(len(offered)):
+			if i in (left, right):
+				pass
+			else:
+				if offered[i] > 10 and offered[i] < 250:
+					dis.append(i)
+
+		return Selection(wear=(left, right), discard=(dis))

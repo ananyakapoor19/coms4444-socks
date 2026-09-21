@@ -13,6 +13,8 @@ This directory is not itself discovered - the registry only matches
 ``player_<digits>`` - so the template can never appear in a run as a competitor.
 """
 
+from itertools import combinations
+
 from models.player import GameContext, PlayerSnapshot, Selection, TurnContext
 from models.player import Player as BasePlayer
 
@@ -100,29 +102,50 @@ class Player1(BasePlayer):
 		"""
 		self.days_seen += 1
 
-		socks_by_colors = sorted((sock, i) for i, sock in enumerate(offered))
+		free = [
+			(a, b)
+			for a, b in combinations(range(len(offered)), 2)
+			if abs(offered[a] - offered[b]) <= 6
+		]
+		if free:
+			pair = min(free, key=lambda p: self._wears(offered[p[0]]) + self._wears(offered[p[1]]))
 
-		best_pair = (socks_by_colors[0][1], socks_by_colors[1][1])
-		best_diff = socks_by_colors[1][0] - socks_by_colors[0][0]
-		for (left, left_i), (right, right_i) in zip(
-			socks_by_colors, socks_by_colors[1:], strict=False
-		):
+			threshold = self.choose_discard_threshold(turn)
+			discard = []
+			for c in range(len(offered)):
+				if (
+					c not in pair
+					and offered[c] >= threshold
+					and offered[c] <= (255 - threshold * 2)
+				):
+					discard.append(c)
+			return Selection(wear=pair, discard=tuple(discard))
+
+		by_shade = sorted((sock, i) for i, sock in enumerate(offered))
+		pair = (by_shade[0][1], by_shade[1][1])
+		best_diff = by_shade[1][0] - by_shade[0][0]
+		for (left, left_i), (right, right_i) in zip(by_shade, by_shade[1:]):
 			diff = right - left
 			if diff < best_diff:
 				best_diff = diff
-				best_pair = (left_i, right_i)
-
+				pair = (left_i, right_i)
+		
 		threshold = self.choose_discard_threshold(turn)
 		discard = []
 		for c in range(len(offered)):
 			if (
-				c not in best_pair
+				c not in pair
 				and offered[c] >= threshold
 				and offered[c] <= (255 - threshold * 2)
 			):
 				discard.append(c)
+		return Selection(wear=pair, discard=tuple(discard))
 
-		return Selection(wear=best_pair, discard=tuple(discard))
+	@staticmethod
+	def _wears(shade: int) -> float:
+		"""Return the number of wears a sock has seen, as a float."""
+		return (255 - shade) / 2 if shade > 64 else float(shade)
+
 
 	def choose_discard_threshold(self, turn: TurnContext) -> float:
 		days_left = float(self.days - turn.day)

@@ -39,7 +39,6 @@ AGE_SCORE_WEIGHT = 1.0
 AGGRESSION_SCORE_WEIGHT = 0.75
 
 
-
 class Player6(BasePlayer):
 	"""Rename me to Player<k>, where <k> is your group number."""
 
@@ -144,14 +143,10 @@ class Player6(BasePlayer):
 		# noramlized score of how worn sock is, 0 is fresh, 1 is terminal shade
 
 		if self._is_black(shade):
-			age = (
-				shade - BLACK_AGE_START
-			) / BLACK_AGE_RANGE
+			age = (shade - BLACK_AGE_START) / BLACK_AGE_RANGE
 
 		else:
-			age = (
-				WHITE_AGE_START - shade
-			) / WHITE_AGE_RANGE
+			age = (WHITE_AGE_START - shade) / WHITE_AGE_RANGE
 
 		return min(1.0, max(0.0, age))
 
@@ -161,11 +156,7 @@ class Player6(BasePlayer):
 
 		compatibility = self._compatibility(shade)
 
-		return max(
-			0.0,
-			1.0 - compatibility / 0.25
-		)
-
+		return max(0.0, 1.0 - compatibility / 0.25)
 
 	def _discard_score(
 		self,
@@ -178,18 +169,10 @@ class Player6(BasePlayer):
 		age = self._age_score(shade)
 		outlier = self._outlier_score(shade)
 
-		score = (
-			AGE_SCORE_WEIGHT * age
-			+ OUTLIER_WEIGHT * outlier
-		)
+		score = AGE_SCORE_WEIGHT * age + OUTLIER_WEIGHT * outlier
 
 		# Aggression > 1 means more willing to discard
-		score *= (
-			1.0
-			+ AGGRESSION_SCORE_WEIGHT
-			* (aggression - 1.0)
-		)
-
+		score *= 1.0 + AGGRESSION_SCORE_WEIGHT * (aggression - 1.0)
 
 		score = max(0.0, score)
 
@@ -288,14 +271,13 @@ class Player6(BasePlayer):
 		discard: list[int] = []
 		aggression = self._discard_aggression(turn)
 		if aggression > 0.0:
-			for i, shade in enumerate (offered):
-
+			for i, shade in enumerate(offered):
 				if i in best_pair:
 					continue
 
 				score = self._discard_score(shade, aggression)
 
-				if score>=DISCARD_THRESHOLD:
+				if score >= DISCARD_THRESHOLD:
 					discard.append(i)
 
 			# white_cutoff = round(WHITE_CUTOFF + 30 * (aggression - 1.0))

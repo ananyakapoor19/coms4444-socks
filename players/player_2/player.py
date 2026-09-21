@@ -1,185 +1,277 @@
-"""Starting point for a group's player.
+"""Group 2 player: distribution-aware sock selection.
 
-Copy this whole directory to ``players/player_<k>/`` using your group number,
-then rename the class to ``Player<k>``. Group 4 would end up with
-``players/player_4/player.py`` containing ``class Player4``. The registry looks
-for exactly that; nothing else needs editing.
+The policy has three parts, each described in ``plan.md`` and
+in ``POLICY_CHANGES.md`` next to this file:
 
-Keep the ``__init__.py``. Discovery uses ``pkgutil.iter_modules``, which only
-reports directories that have one, so a group directory without it is silently
-invisible to the simulator - no error, just a player that never turns up.
-
-This directory is not itself discovered - the registry only matches
-``player_<digits>`` - so the template can never appear in a run as a competitor.
+1. Track the shade distribution of the socks we have seen, per colour, over a
+   sliding window using Welford's online mean/variance update.
+2. Wear the pair on offer with the least embarrassment.
+3. For the socks we did not wear, enumerate every discard subset and keep the
+   one that leaves our tracked distribution with the smallest std.
 """
 
-from collections import defaultdict, deque
+from collections import deque
 from itertools import combinations
+from math import sqrt
 
+from core.engine import PACK_COST
 from models.player import GameContext, PlayerSnapshot, Selection, TurnContext
 from models.player import Player as BasePlayer
 
+EMBARRASSMENT_THRESHOLD = 6
+
+# Shade semantics, mirrored from models/sock.py. A shade above BLACK_CEILING is
+# a white sock and a shade at or below it is a black one; the ranges never
+# overlap, so colour can be inferred from shade without ambiguity.
+WHITE_FLOOR = 127
+WHITE_FADE = 2
+BLACK_CEILING = 64
+BLACK_FADE = 1
+
+WHITE = 'white'
+BLACK = 'black'
+
+
+def colour_of(shade: int) -> str:
+	return WHITE if shade > BLACK_CEILING else BLACK
+
+
+def aged_shade(shade: int) -> int:
+	"""Shade a sock will have after being worn once and washed."""
+	if colour_of(shade) == WHITE:
+		return max(WHITE_FLOOR, shade - WHITE_FADE)
+	return min(BLACK_CEILING, shade + BLACK_FADE)
+
+
+def pair_embarrassment(a: int, b: int) -> float:
+	diff = abs(a - b)
+	return float(diff) if diff > EMBARRASSMENT_THRESHOLD else 0.0
+
+
+class WindowedStats:
+	"""Mean and population std over the last ``window`` values.
+
+	While fewer than ``window`` values have been seen this is plain Welford:
+	each ``add`` folds one value into the running mean and M2 (sum of squared
+	deviations). Once the window is full, adding a value first evicts the
+	oldest one using the reverse Welford update, so mean/M2 always describe
+	exactly the values currently in the deque without ever re-summing them.
+	"""
+
+	def __init__(self, window: int) -> None:
+		self.window = window
+		self.values: deque[float] = deque()
+		self.n = 0
+		self.mean = 0.0
+		self.m2 = 0.0
+
+	def add(self, x: float) -> None:
+		if self.n >= self.window:
+			self._remove(self.values.popleft())
+		self.values.append(x)
+		self.n += 1
+		delta = x - self.mean
+		self.mean += delta / self.n
+		self.m2 += delta * (x - self.mean)
+
+	def _remove(self, x: float) -> None:
+		if self.n <= 1:
+			self.n = 0
+			self.mean = 0.0
+			self.m2 = 0.0
+			return
+		new_mean = (self.n * self.mean - x) / (self.n - 1)
+		self.m2 -= (x - self.mean) * (x - new_mean)
+		# Floating point can leave M2 a hair below zero once the window is
+		# nearly uniform; clamp so the std is never NaN.
+		if self.m2 < 0.0:
+			self.m2 = 0.0
+		self.mean = new_mean
+		self.n -= 1
+
+	@property
+	def variance(self) -> float:
+		return self.m2 / self.n if self.n else 0.0
+
+	@property
+	def std(self) -> float:
+		return sqrt(self.variance)
+
+	def copy(self) -> 'WindowedStats':
+		other = WindowedStats(self.window)
+		other.values = deque(self.values)
+		other.n = self.n
+		other.mean = self.mean
+		other.m2 = self.m2
+		return other
+
 
 class Player2(BasePlayer):
-	"""Rename me to Player<k>, where <k> is your group number."""
-
 	def __init__(self, snapshot: PlayerSnapshot, ctx: GameContext) -> None:
 		super().__init__(snapshot, ctx)
 
-		# super() has already set these from ctx and snapshot:
-		#
-		#   self.index           which roommate you are (0-based)
-		#   self.id              your UUID, stable for the whole simulation
-		#   self.capacity        C, the drawer size at the start
-		#   self.roommates       n, how many of you share the drawer
-		#   self.selection_unit  how many socks you are handed each day
-		#   self.days            how long the simulation runs
-		#
-		# The engine constructs you once, before day 1, and it constructs you
-		# itself - you cannot preload state into an already-built object. Anything
-		# you want to carry between days lives on self, so initialise it here.
-		self.days_seen = 0
-		self.budget_per_day = []
-		self.sock_distributions_per_day = [defaultdict(int)]
-
-		# window size for distribution statistics
+		# Sliding-window distribution of the shades we believe are in the
+		# drawer, tracked separately per colour. Black and white shades live in
+		# disjoint ranges (0-64 vs 127-255), so a single mixed distribution
+		# would just measure the black/white ratio rather than how well the
+		# socks within a colour match each other.
 		self.running_window_size = 20
-		self.global_history = []
-		self.local_black_history = deque(maxlen=self.running_window_size)
-		self.local_white_history = deque(maxlen=self.running_window_size)
-		self.black_history = []
-		self.white_history = []
+		self.stats: dict[str, WindowedStats] = {
+			WHITE: WindowedStats(self.running_window_size),
+			BLACK: WindowedStats(self.running_window_size),
+		}
 
-		self.embarassment_thresh = 6
-		# TODO: maybe per-color thresholds?
-		self.outlier_z = 1.5
+		# Do not discard socks of a colour until we have seen at least this
+		# many of them - a std over two or three samples says nothing.
 		self.min_dist_samples = 10
 
+		# Diagnostics, one entry per day: the min and mean embarrassment over
+		# all pairs in ``offered``, a proxy for how well-matched the drawer is,
+		# and the household budget remaining.
+		self.offered_pair_min: list[float] = []
+		self.offered_pair_mean: list[float] = []
+		self.budget_per_day: list[float] = []
+		self.days_seen = 0
+
+	# ------------------------------------------------------------------ policy
+
 	def select_socks(self, offered: tuple[int, ...], turn: TurnContext) -> Selection:
-		"""Choose two socks to wear, and decide the fate of the rest.
-
-		Called once per day, in an order that is reshuffled daily. Everything you
-		are allowed to know is in the two arguments.
-
-		``offered`` is a tuple of ``selection_unit`` shade values, 0-255.
-
-		WHAT YOU CAN SEE
-
-			offered[i]                  the shade of the i-th sock on offer
-			turn.day                    today's day number, 1-based
-			turn.total_spent            dollars spent by the household so far
-			turn.embarrassment_history  your own daily scores, one per day
-			turn.total_embarrassment    the sum of that history
-			self.capacity / self.roommates / self.selection_unit / self.days
-
-		WHAT YOU CANNOT SEE
-
-			- Which sock is which. Indices are positions in THIS tuple only. The
-				same index tomorrow is a different sock, so you cannot track an
-				individual sock across turns or build up a map of the drawer.
-			- Anyone else's socks, choices or embarrassment.
-			- The shade distribution left in the drawer.
-			- How many socks have been discarded, or how close the household is to
-				the next six-pack. You see total_spent only, after the fact.
-
-		With n == 1 you are alone with the drawer, so tracking its full state IS
-		possible. That is intentional, not a leak - it is what makes the pooled
-		versus separate comparison in goal 3 meaningful.
-
-		WHAT THE SHADES MEAN
-
-		White socks start at 255 and fade by 2 per wear, stopping at 127. Black
-		socks start at 0 and rise by 1 per wear, stopping at 64. The two ranges
-		never overlap, so a shade above 64 is a white sock and a shade at or below
-		64 is a black one. Inferring colour from shade is fair game.
-
-		Wearing a pair whose shades differ by MORE than 6 costs you that
-		difference. A difference of exactly 6 is free.
-
-		A sock already at 127 or 64 when you are handed it has a 25% chance of
-		developing a hole when worn, and is thrown out immediately. Six discards
-		of one colour buy a fresh six-pack for $10, and the surplus carries over.
-
-		RETURNING A DECISION
-
-			wear     exactly two distinct indices into ``offered``
-			discard  any subset of the REMAINING indices, possibly empty
-
-		Anything you neither wear nor discard goes back in the drawer unworn and
-		keeps its shade. Only worn socks age.
-
-		IF YOU GET IT WRONG
-
-		An invalid selection, an exception, or taking longer than the --timeout
-		budget forfeits your turn: the engine wears the first two socks and
-		discards nothing. It is recorded as a fault and shown in the results, so a
-		forfeit is visible rather than silent. Your failure never affects the
-		other groups.
-		"""
-
-		"""
-		want to have:
-		[x] want to track spending throughout the simulation
-		[x] want to track what socks we've seen so far
-		- prioritize white socks
-
-		# black sock selection & discarding policy
-		1. embarassment_thresh = X
-		2. if minimum possible embarassment < embarassment_thresh
-		3. check black sock STD & white sock STD, compare to previous day(s)
-		4. discard black socks that fall outside of X STD from mean
-		5. 
-
-		# new_mean = (old_mean * window_size + new_value) / (window_size + 1)
-		"""
-		# update our distribution of sock colors seen so far
-		for _idx, sock_value in enumerate(offered):
-			if sock_value > 64:
-				self.white_history.append(sock_value)
-			else:
-				self.black_history.append(sock_value)
-			self.global_history.append(sock_value)
-
-		# want to track budget / spending, per day
+		self.days_seen += 1
 		self.budget_per_day.append(turn.budget_remaining)
 
-		# cooperative policy - will only discard socks if we haven't been overspending as a household
-		self.days_seen += 1
+		# 1. Pairwise embarrassment of everything we were handed. This gauges
+		#    the drawer's distribution over time and drives the wear choice.
+		pairs = pairwise_sock_embarassments(offered)
+		scores = [p['embarrassment'] for p in pairs]
+		self.offered_pair_min.append(min(scores))
+		self.offered_pair_mean.append(sum(scores) / len(scores))
+
+		# 2. If any pair is free (embarrassment 0), use that freedom to
+		#    choose the pair that leaves the projected per-colour shade
+		#    distributions tightest after the worn socks age. Only when every
+		#    pair has positive embarrassment do we take the minimum-cost pair.
+		wear = self.choose_pair(offered, pairs)
+		leftovers = [i for i in range(len(offered)) if i not in wear]
+
+		# 3. Among every discard subset of the leftovers, keep the one that
+		#    leaves our tracked distribution with the smallest std.
+		discard = self.choose_discards(offered, wear, leftovers, turn)
+
+		# Commit the chosen action to the real distribution: worn socks come
+		# back aged, returned socks come back unchanged, discarded socks leave.
+		self.apply_action(self.stats, offered, wear, leftovers, discard)
+
+		return Selection(wear=wear, discard=discard)
+
+	def choose_pair(self, offered: tuple[int, ...], pairs: list[dict]) -> tuple[int, int]:
+		"""Use zero-cost choices to improve the projected drawer distribution.
+
+		If any pair has zero immediate embarrassment (shade gap <= 6), project
+		tomorrow's tracked distribution for each such pair: worn socks return
+		aged and all leftovers return unchanged. Pick the free pair with the
+		smallest resulting sum of black + white std. If every pair has positive
+		embarrassment, fall back to the minimum-embarrassment pair.
+		"""
+		free_pairs = [p for p in pairs if p['embarrassment'] == 0.0]
+		if not free_pairs:
+			best = min(
+				pairs,
+				key=lambda p: (
+					p['embarrassment'],
+					abs(p['shades'][0] - p['shades'][1]),
+					p['pair'],
+				),
+			)
+			return best['pair']
+
+		best_pair: tuple[int, int] | None = None
+		best_key: tuple[float, int, tuple[int, int]] | None = None
+		for candidate in free_pairs:
+			wear = candidate['pair']
+			leftovers = [i for i in range(len(offered)) if i not in wear]
+			trial = {c: s.copy() for c, s in self.stats.items()}
+			self.apply_action(trial, offered, wear, leftovers, ())
+			total_std = sum(s.std for s in trial.values())
+			# Stable deterministic tie-breaks if the projected spreads match.
+			key = (total_std, abs(candidate['shades'][0] - candidate['shades'][1]), wear)
+			if best_key is None or key < best_key:
+				best_key = key
+				best_pair = wear
+
+		assert best_pair is not None
+		return best_pair
+
+	def can_discard(self, turn: TurnContext) -> bool:
+		"""Cooperative budget guard: only discard while the household is on or
+		under its average spending pace and can still afford a six-pack.
+
+		With no ``--budget`` both ``budget_remaining`` and the pace threshold
+		are ``inf``, so discarding is always allowed on an unlimited run.
+		"""
+		if turn.budget_remaining < PACK_COST:
+			return False
 		initial_budget = turn.total_spent + turn.budget_remaining
-		thresh = initial_budget / self.days  # avg
-		bool_discard_socks = turn.total_spent / turn.day < thresh
+		pace = initial_budget / self.days
+		return turn.total_spent / turn.day <= pace
 
-		white_socks = []
-		black_socks = []
+	def choose_discards(
+		self,
+		offered: tuple[int, ...],
+		wear: tuple[int, int],
+		leftovers: list[int],
+		turn: TurnContext,
+	) -> tuple[int, ...]:
+		if not leftovers or not self.can_discard(turn):
+			return ()
 
-		for i, sock_value in enumerate(offered[:4]):
-			# if white sock
-			if sock_value > 64:
-				white_socks.append(i)
-			# black sock
-			else:
-				black_socks.append(i)
+		# A leftover is only eligible for discard once we have enough samples
+		# of its colour to trust the std.
+		eligible = [
+			i for i in leftovers if self.stats[colour_of(offered[i])].n >= self.min_dist_samples
+		]
 
-		# TODO: need to pick 2 socks that fall below self.embarassment_thresh
-		if len(black_socks) >= 2:
-			socks_to_wear = [black_socks[0], black_socks[1]]
-		else:
-			socks_to_wear = [white_socks[0], white_socks[1]]
+		best_action: tuple[int, ...] = ()
+		best_key: tuple[float, int] | None = None
+		for r in range(len(eligible) + 1):
+			for subset in combinations(eligible, r):
+				trial = {c: s.copy() for c, s in self.stats.items()}
+				self.apply_action(trial, offered, wear, leftovers, subset)
+				total_std = sum(s.std for s in trial.values())
+				# Ties go to the cheaper action (fewer discards).
+				key = (total_std, len(subset))
+				if best_key is None or key < best_key:
+					best_key = key
+					best_action = subset
+		return tuple(sorted(best_action))
 
-		if bool_discard_socks:
-			return Selection(wear=socks_to_wear, discard=white_socks)
-		else:
-			return Selection(wear=socks_to_wear, discard=())
+	@staticmethod
+	def apply_action(
+		stats: dict[str, WindowedStats],
+		offered: tuple[int, ...],
+		wear: tuple[int, int],
+		leftovers: list[int],
+		discard: tuple[int, ...],
+	) -> None:
+		"""Fold one day's outcome into ``stats`` (mutates in place)."""
+		for i in wear:
+			shade = aged_shade(offered[i])
+			stats[colour_of(shade)].add(shade)
+		for i in leftovers:
+			if i in discard:
+				continue
+			stats[colour_of(offered[i])].add(offered[i])
 
 
-def pairwise_sock_embarassments(offered):
+def pairwise_sock_embarassments(offered: tuple[int, ...]) -> list[dict]:
+	"""Every unordered pair of indices in ``offered`` with its shades and the
+	embarrassment cost of wearing it."""
 	results = []
-
 	for i, j in combinations(range(len(offered)), 2):
-		diff = abs(offered[i] - offered[j])
-		embarrassment = diff if diff > 6 else 0
-
 		results.append(
-			{'pair': (i, j), 'shades': (offered[i], offered[j]), 'embarrassment': embarrassment}
+			{
+				'pair': (i, j),
+				'shades': (offered[i], offered[j]),
+				'embarrassment': pair_embarrassment(offered[i], offered[j]),
+			}
 		)
 	return results

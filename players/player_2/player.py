@@ -146,8 +146,11 @@ class Player2(BasePlayer):
 		self.offered_pair_min.append(min(scores))
 		self.offered_pair_mean.append(sum(scores) / len(scores))
 
-		# 2. Wear the least embarrassing pair.
-		wear = self.choose_pair(pairs)
+		# 2. If any pair is free (embarrassment 0), use that freedom to
+		#    choose the pair that leaves the projected per-colour shade
+		#    distributions tightest after the worn socks age. Only when every
+		#    pair has positive embarrassment do we take the minimum-cost pair.
+		wear = self.choose_pair(offered, pairs)
 		leftovers = [i for i in range(len(offered)) if i not in wear]
 
 		# 3. Among every discard subset of the leftovers, keep the one that
@@ -160,13 +163,43 @@ class Player2(BasePlayer):
 
 		return Selection(wear=wear, discard=discard)
 
-	def choose_pair(self, pairs: list[dict]) -> tuple[int, int]:
-		"""Minimum embarrassment; ties broken by raw shade gap, then index."""
-		best = min(
-			pairs,
-			key=lambda p: (p['embarrassment'], abs(p['shades'][0] - p['shades'][1]), p['pair']),
-		)
-		return best['pair']
+	def choose_pair(self, offered: tuple[int, ...], pairs: list[dict]) -> tuple[int, int]:
+		"""Use zero-cost choices to improve the projected drawer distribution.
+
+		If any pair has zero immediate embarrassment (shade gap <= 6), project
+		tomorrow's tracked distribution for each such pair: worn socks return
+		aged and all leftovers return unchanged. Pick the free pair with the
+		smallest resulting sum of black + white std. If every pair has positive
+		embarrassment, fall back to the minimum-embarrassment pair.
+		"""
+		free_pairs = [p for p in pairs if p['embarrassment'] == 0.0]
+		if not free_pairs:
+			best = min(
+				pairs,
+				key=lambda p: (
+					p['embarrassment'],
+					abs(p['shades'][0] - p['shades'][1]),
+					p['pair'],
+				),
+			)
+			return best['pair']
+
+		best_pair: tuple[int, int] | None = None
+		best_key: tuple[float, int, tuple[int, int]] | None = None
+		for candidate in free_pairs:
+			wear = candidate['pair']
+			leftovers = [i for i in range(len(offered)) if i not in wear]
+			trial = {c: s.copy() for c, s in self.stats.items()}
+			self.apply_action(trial, offered, wear, leftovers, ())
+			total_std = sum(s.std for s in trial.values())
+			# Stable deterministic tie-breaks if the projected spreads match.
+			key = (total_std, abs(candidate['shades'][0] - candidate['shades'][1]), wear)
+			if best_key is None or key < best_key:
+				best_key = key
+				best_pair = wear
+
+		assert best_pair is not None
+		return best_pair
 
 	def can_discard(self, turn: TurnContext) -> bool:
 		"""Cooperative budget guard: only discard while the household is on or

@@ -52,9 +52,14 @@ ratio of the drawer, not how well socks of the same colour match.
 1. `pairwise_sock_embarassments(offered)` scores every unordered pair. The min
    and mean over all pairs are logged per day (`offered_pair_min`,
    `offered_pair_mean`) as a proxy for how well-matched the drawer is.
-2. `choose_pair()` wears the pair with minimum embarrassment. Ties (many pairs
-   score 0) are broken by the raw shade gap, then by index.
-3. The remaining indices are the leftovers that the discard policy branches
+2. If any pair has zero immediate embarrassment (shade gap <= 6), `choose_pair()`
+   projects the next tracked distribution for each zero-cost pair: worn socks
+   return aged and all leftovers return unchanged. It chooses the free pair
+   with the smallest sum of black + white std, using raw gap/index only as
+   deterministic tie-breaks.
+3. Only when every pair has positive embarrassment does `choose_pair()` wear
+   the minimum-embarrassment pair.
+4. The remaining indices are the leftovers that the discard policy branches
    from.
 
 ### Sock discard policy

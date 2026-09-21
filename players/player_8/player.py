@@ -188,7 +188,7 @@ class Player8(BasePlayer):
 		other groups.
 		"""
 		center_ratio = (
-    		self.budget_lower_ratio + self.budget_upper_ratio
+			self.budget_lower_ratio + self.budget_upper_ratio
 		) / 2 + self.budget_center_offset
 		if not self.budget_lower_ratio < center_ratio < self.budget_upper_ratio:
 			raise ValueError('budget center must be strictly between the lower and upper bounds')
@@ -286,8 +286,6 @@ class Player8(BasePlayer):
 		)[:discard_count]
 
 		return Selection(wear=best_pair, discard=tuple(discard))
-
-
 
 	def get_expected_budget_simplified(self, total_budget: float) -> float:
 		total_days: int = self.days

@@ -147,9 +147,13 @@ class Player8(BasePlayer):
 		self.history.record(day=turn.day, offered=offered)
 
 		# Calculate the expected budget (today's estimated remaining budget)
-		exp_budget: int = self.get_expected_budget()
-		exp_budget_smoothened: int = self.get_expected_budget_smoothened()
-		print(exp_budget, exp_budget_smoothened)
+		total_budget: float = turn.budget_remaining + turn.total_spent
+		exp_budget_simplified: float = self.get_expected_budget_simplified(total_budget)
+		exp_budget: float = self.get_expected_budget(total_budget)
+		exp_budget_smoothened: float = self.get_expected_budget_smoothened(total_budget)
+		print(
+			f'budget: ({exp_budget_simplified:.3f}, {exp_budget:.3f}, {exp_budget_smoothened:.3f})'
+		)
 
 		# Edge cases
 		# Handle when a pair of socks cannot be made
@@ -185,60 +189,45 @@ class Player8(BasePlayer):
 
 		return Selection(wear=best_pair, discard=tuple(discard))
 
-	def get_expected_budget_simplified(self) -> int:
+	def get_expected_budget_simplified(self, total_budget: float) -> float:
 		total_days: int = self.days
 		current_day: int = self.days_seen
-		total_roommates: int = self.roommates
-
-		# We assume that the total budget is `4 * n * d`.
-		estimated_total_budget: int = 4 * total_roommates * total_days
 
 		# We consider three cases based on the `day_ratio`: [0, 0.333], (0.333, 0.667), [0.667, 1]
 		day_ratio: float = current_day / total_days
 		if day_ratio <= 0.333:
 			# At the beginning, we don't want to use any budget
-			return estimated_total_budget
+			return total_budget
 		elif day_ratio >= 0.667:
 			# At the final stage, we do not use any budget either
-			return 0
+			return 0.0
 		else:
-			# We consider to use the budget evenly
-			return -12 * total_roommates * current_day + 8 * total_roommates * total_days
+			# We consider to spend the budget evenly
+			return (2 - 3 * day_ratio) * total_budget
 
-	def get_expected_budget(self, k1: float = 0.333, k2: float = 0.667, f: float = 4.0) -> int:
+	def get_expected_budget(
+		self, total_budget: float, k1: float = 0.333, k2: float = 0.667
+	) -> float:
 		assert 0 <= k1 < k2 <= 1
-		assert 0 <= f <= 10
 
 		total_days: int = self.days
 		current_day: int = self.days_seen
-		total_roommates: int = self.roommates
-
-		# We assume that the total budget is `f * n * d`.
-		estimated_total_budget: float = f * total_roommates * total_days
 
 		# We consider three cases based on the `day_ratio`: [0, k1], (k1, k2), [k2, 1]
 		day_ratio: float = current_day / total_days
 		if day_ratio <= k1:
 			# At the beginning, we don't want to use any budget
-			return int(estimated_total_budget)
+			return total_budget
 		elif day_ratio >= k2:
 			# At the final stage, we do not use any budget either
-			return 0
+			return 0.0
 		else:
-			# We consider to use the budget evenly
-			return int((k2 * total_days - current_day) * f * total_roommates / (k2 - k1))
+			# We consider to spend the budget evenly
+			return (k2 - day_ratio) * total_budget / (k2 - k1)
 
-	def get_expected_budget_smoothened(self, f: float = 4.0) -> int:
-		assert 0 <= f <= 10
-
+	def get_expected_budget_smoothened(self, total_budget: float) -> float:
 		total_days: int = self.days
 		current_day: int = self.days_seen
-		total_roommates: int = self.roommates
-
-		# We assume that the total budget is `f * n * d`.
-		estimated_total_budget: float = f * total_roommates * total_days
 
 		# We use `sin` to smoothen the expected budget
-		return int(
-			0.5 * estimated_total_budget * (1 + sin(pi / total_days * current_day + 0.5 * pi))
-		)
+		return 0.5 * total_budget * (1 + sin(pi / total_days * current_day + 0.5 * pi))

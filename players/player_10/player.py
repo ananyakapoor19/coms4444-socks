@@ -45,7 +45,7 @@ class Player10(BasePlayer):
 	def aging(self, shade: int) -> int:
 		# check how much a sock has aged
 		if shade >= 127:  # white sock
-			return 255 - shade
+			return (255 - shade) / 2
 		else:  # black sock
 			return shade
 
@@ -137,7 +137,7 @@ class Player10(BasePlayer):
 		days_remaining = max(self.days - turn.day + 1, 1)
 
 		# check if we have an inf budget, otherwise we add a variable to pace our spending based on days remaining and budget remaining
-		if turn.budget_remaining == 'inf':
+		if turn.budget_remaining is None or turn.budget_remaining == float('inf'):
 			buy_pack = True
 		else:
 			daily_rate = turn.budget_remaining / days_remaining
@@ -145,8 +145,17 @@ class Player10(BasePlayer):
 
 		if turn.budget_remaining >= PACK_COST and buy_pack:
 			leftovers = [k for k in range(len(offered)) if k not in (i, j)]
-			worst = max(leftovers, key=lambda k: abs(offered[k] - worn))
-			if abs(offered[worst] - worn) > THRESHOLD:
-				discard.append(worst)
+			# wait a week before discarding, dont want to discard too early but just put a week for now
+			if turn.day >= 7 and leftovers:
+				# discard socks that have ageed 15 units and are beyond threshold - need to fix this later to account more for future distribution
+				discardable = [
+					k
+					for k in leftovers
+					if self.aging(offered[k]) >= 15 and abs(offered[k] - worn) > THRESHOLD
+				]
+				# if you can discard something take the worst and discard it
+				if discardable:
+					worst = max(discardable, key=lambda k: abs(offered[k] - worn))
+					discard.append(worst)
 
 		return Selection(wear=(i, j), discard=(tuple(discard)))

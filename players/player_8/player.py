@@ -211,11 +211,10 @@ class Player8(BasePlayer):
 		if n == 1:
 			return Selection(wear=(0,), discard=())
 
-		# Finds the index pair of socks that is closest to 6
-		target = 6
+		# Finds the index pair of socks with lowest embarrassment
 		best_pair = min(
 			combinations(range(n), 2),
-			key=lambda pair: abs(abs(offered[pair[0]] - offered[pair[1]]) - target),
+			key=lambda pair: abs(offered[pair[0]] - offered[pair[1]]),
 		)
 
 		# Create an array of the remaining socks for discard method

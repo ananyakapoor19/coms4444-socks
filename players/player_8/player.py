@@ -15,6 +15,7 @@ This directory is not itself discovered - the registry only matches
 
 from dataclasses import dataclass
 from itertools import combinations
+from math import isclose, pi, sin
 
 from models.player import GameContext, PlayerSnapshot, Selection, TurnContext
 from models.player import Player as BasePlayer
@@ -59,9 +60,53 @@ class SockHistory:
 		# Return a tuple so callers cannot change the stored list.
 		return tuple(self._records)
 
+	def recent_means(self, window: int, fallback: tuple[int, ...] = ()) -> tuple[float, float]:
+		"""Average observed shades by colour over the last ``window`` rounds.
+
+		Use the current offer only for colours missing from those rounds.
+		"""
+		if window < 1:
+			raise ValueError('history window must be positive')
+		recent = self._records[-window:]
+		black = [shade for record in recent for shade in record.black_shades]
+		white = [shade for record in recent for shade in record.white_shades]
+		if not black:
+			black = [shade for shade in fallback if shade <= 64]
+		if not white:
+			white = [shade for shade in fallback if shade >= 127]
+		return (
+			sum(black) / len(black) if black else 0.0,
+			sum(white) / len(white) if white else 255.0,
+		)
+
 
 class Player8(BasePlayer):
 	"""Rename me to Player<k>, where <k> is your group number."""
+
+	# 丢袜策略调参区
+	# 预算比例均相对于实际总预算，0.05 表示 5 个百分点。
+	# 参数依次为：历史回合数（不含当前回合）、预算下界、预算上界、中点偏移量、丢弃积极度。
+	# 低于下界不丢，高于上界丢两只；中点正偏移右移、更保守，负偏移更积极。
+	# 中心 = (下界 + 上界) / 2 + 偏移；必须严格位于上下界之间。
+	# 中心处阈值等于历史平均，不保证丢一只。
+	# 积极度必须为有限正数：1 为线性，大于 1 更积极，小于 1 更保守。
+	# 积极度只改变区间内的曲线形状，不改变上下界和中点的阈值。
+
+	# Tunable discard policy parameters
+	# All budget ratios use the actual total budget; 0.05 means 5 percentage points.
+	history_window = 10  # Previous rounds to average, excluding the current round.
+	budget_lower_ratio = -0.20  # Discard none below this lower bound.
+	budget_upper_ratio = 0.20  # Discard two above this upper bound.
+
+	# A positive offset shifts the center right, making discards more conservative;
+	# a negative offset makes them more aggressive.
+	# Center = (lower + upper) / 2 + offset; it must stay strictly inside the bounds.
+	# At the center, thresholds equal historical means, not a guaranteed discard.
+	budget_center_offset = 0.00
+
+	# Positive finite value: 1 keeps linear interpolation; >1 is more aggressive,
+	# <1 is more conservative. Endpoints and the shifted center stay fixed.
+	discard_aggressiveness = 1.0
 
 	def __init__(self, snapshot: PlayerSnapshot, ctx: GameContext) -> None:
 		super().__init__(snapshot, ctx)
@@ -142,8 +187,21 @@ class Player8(BasePlayer):
 		forfeit is visible rather than silent. Your failure never affects the
 		other groups.
 		"""
+		center_ratio = (
+			self.budget_lower_ratio + self.budget_upper_ratio
+		) / 2 + self.budget_center_offset
+		if not self.budget_lower_ratio < center_ratio < self.budget_upper_ratio:
+			raise ValueError('budget center must be strictly between the lower and upper bounds')
+		if not 0 < self.discard_aggressiveness < float('inf'):
+			raise ValueError('discard aggressiveness must be positive and finite')
+
 		self.days_seen += 1
+		black_mean, white_mean = self.history.recent_means(self.history_window, offered)
 		self.history.record(day=turn.day, offered=offered)
+
+		# Calculate the expected budget (today's estimated remaining budget)
+		total_budget: float = turn.budget_remaining + turn.total_spent
+		exp_budget: float = self.get_expected_budget(total_budget)
 
 		# Edge cases
 		# Handle when a pair of socks cannot be made
@@ -153,28 +211,120 @@ class Player8(BasePlayer):
 		if n == 1:
 			return Selection(wear=(0,), discard=())
 
-		# Finds the index pair of socks that is closest to 6
-		target = 6
+		# Finds the index pair of socks with lowest embarrassment
 		best_pair = min(
 			combinations(range(n), 2),
-			key=lambda pair: abs(abs(offered[pair[0]] - offered[pair[1]]) - target),
+			key=lambda pair: abs(offered[pair[0]] - offered[pair[1]]),
 		)
 
 		# Create an array of the remaining socks for discard method
 		worn = set(best_pair)
 		unworn = [i for i in range(n) if i not in worn]
 
-		if turn.budget_remaining == 0:
+		if turn.budget_remaining <= 0 or not unworn:
 			return Selection(wear=best_pair, discard=())
 
-		discard = []
-		for i in unworn:
-			shade = offered[i]
-			if shade <= 64:  # Black sock
-				if shade > 58:
-					discard.append(i)
-			else:  # White sock
-				if shade < 133:
-					discard.append(i)
+		if turn.budget_remaining == float('inf'):
+			# An unlimited budget always permits the high-budget discard count.
+			discard_count = 2
+		else:
+			# B = remaining budget, E = expected budget, T = actual total budget.
+			# Delta = B - E; L = lower_ratio * T; U = upper_ratio * T.
+			# C = ((lower_ratio + upper_ratio) / 2 + center_offset) * T.
+			budget_gap = turn.budget_remaining - exp_budget
+			lower_gap = self.budget_lower_ratio * total_budget
+			upper_gap = self.budget_upper_ratio * total_budget
+			center_gap = center_ratio * total_budget
+			# Snap round-off at exact boundaries, e.g. 600.0000000000001.
+			for boundary in (lower_gap, center_gap, upper_gap):
+				if isclose(budget_gap, boundary, rel_tol=1e-12, abs_tol=1e-9):
+					budget_gap = boundary
+					break
+			if budget_gap < lower_gap:
+				discard_count = 0
+			elif budget_gap > upper_gap:
+				discard_count = 2
+			else:
+				# Position -1/0/+1 means lower bound/shifted center/upper bound. Thresholds
+				# move from worn-out shades, through historical means, to new shades.
+				# mu_b, mu_w = mean black/white shades from the previous history_window rounds.
+				# a = discard_aggressiveness > 0; p = raw position; q = curved position.
+				# p = (Delta - C) / (C - L) if Delta <= C, otherwise (Delta - C) / (U - C).
+				# q = -(-p)^a if p <= 0, otherwise p^(1/a). Here ^ means exponentiation.
+				# a = 1 gives q = p; a > 1 increases q and makes discards more aggressive.
+				# Both mappings keep p = -1, 0, +1 fixed and are continuous at p = 0.
+				if budget_gap <= center_gap:
+					position = (budget_gap - center_gap) / (center_gap - lower_gap)
+					position = -((-position) ** self.discard_aggressiveness)
+					# t_b = mu_b - q * (64 - mu_b); t_w = mu_w + q * (mu_w - 127).
+					black_threshold = black_mean - position * (64 - black_mean)
+					white_threshold = white_mean + position * (white_mean - 127)
+				else:
+					position = (budget_gap - center_gap) / (upper_gap - center_gap)
+					position = position ** (1 / self.discard_aggressiveness)
+					# t_b = mu_b * (1 - q); t_w = mu_w + q * (255 - mu_w).
+					black_threshold = black_mean * (1 - position)
+					white_threshold = white_mean + position * (255 - white_mean)
+				# Eligible: black shade >= t_b, or white shade <= t_w.
+				# Discard at most one eligible unworn sock; discard none if no sock qualifies.
+				unworn = [
+					i
+					for i in unworn
+					if (
+						offered[i] >= black_threshold
+						if offered[i] <= 64
+						else offered[i] <= white_threshold
+					)
+				]
+				discard_count = 1
+
+		# Prefer unworn socks closest to the requested black/white shade targets.
+		discard = sorted(
+			unworn,
+			key=lambda i: abs(offered[i] - (64 if offered[i] <= 64 else 128)),
+		)[:discard_count]
 
 		return Selection(wear=best_pair, discard=tuple(discard))
+
+	def get_expected_budget_simplified(self, total_budget: float) -> float:
+		total_days: int = self.days
+		current_day: int = self.days_seen
+
+		# We consider three cases based on the `day_ratio`: [0, 0.333], (0.333, 0.667), [0.667, 1]
+		day_ratio: float = current_day / total_days
+		if day_ratio <= 0.333:
+			# At the beginning, we don't want to use any budget
+			return total_budget
+		elif day_ratio >= 0.667:
+			# At the final stage, we do not use any budget either
+			return 0.0
+		else:
+			# We consider to spend the budget evenly
+			return (2 - 3 * day_ratio) * total_budget
+
+	def get_expected_budget(
+		self, total_budget: float, k1: float = 0.333, k2: float = 0.95
+	) -> float:
+		assert 0 <= k1 < k2 <= 1
+
+		total_days: int = self.days
+		current_day: int = self.days_seen
+
+		# We consider three cases based on the `day_ratio`: [0, k1], (k1, k2), [k2, 1]
+		day_ratio: float = current_day / total_days
+		if day_ratio <= k1:
+			# At the beginning, we don't want to use any budget
+			return total_budget
+		elif day_ratio >= k2:
+			# At the final stage, we do not use any budget either
+			return 0.0
+		else:
+			# We consider to spend the budget evenly
+			return (k2 - day_ratio) * total_budget / (k2 - k1)
+
+	def get_expected_budget_smoothened(self, total_budget: float) -> float:
+		total_days: int = self.days
+		current_day: int = self.days_seen
+
+		# We use `sin` to smoothen the expected budget
+		return 0.5 * total_budget * (1 + sin(pi / total_days * current_day + 0.5 * pi))

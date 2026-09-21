@@ -20,12 +20,23 @@ THRESHOLD = 6
 BUCKETS = 8
 HIST_DECAY = 0.985
 PACK_COST = 10.0
-WHITE_CUTOFF = 200
+# WHITE_CUTOFF = 200
 ENDGAME_START = 0.8
 ENDGAME_RESERVE = 0.2
 SPEND_RATE_ALPHA = 0.3
 MIN_COMPATIBILITY = 0.02
 MAX_COMPATIBILITY = 0.18
+
+# tryign to add discard score calculations
+DISCARD_THRESHOLD = 1.0
+TERMINAL_DISCARD_SCORE = 3.0
+WHITE_AGE_START = 200
+WHITE_AGE_RANGE = 73
+BLACK_AGE_START = 40
+BLACK_AGE_RANGE = 24
+OUTLIER_WEIGHT = 1.0
+AGE_SCORE_WEIGHT = 1.0
+AGGRESSION_SCORE_WEIGHT = 0.75
 
 
 class Player6(BasePlayer):
@@ -128,6 +139,53 @@ class Player6(BasePlayer):
 			time_factor += 0.25 * ((progress - ENDGAME_START) / (1.0 - ENDGAME_START))
 		return min(2.0, pace_factor * time_factor)
 
+	def _age_score(self, shade: int) -> float:
+		# noramlized score of how worn sock is, 0 is fresh, 1 is terminal shade
+
+		if self._is_black(shade):
+			age = (shade - BLACK_AGE_START) / BLACK_AGE_RANGE
+
+		else:
+			age = (WHITE_AGE_START - shade) / WHITE_AGE_RANGE
+
+		return min(1.0, max(0.0, age))
+
+	def _outlier_score(self, shade: int) -> float:
+		# return how unusual sock is in observed distribution
+		# common low score, rare high score
+
+		compatibility = self._compatibility(shade)
+
+		return max(0.0, 1.0 - compatibility / 0.25)
+
+	def _discard_score(
+		self,
+		shade: int,
+		aggression: float,
+	) -> float:
+		# basef on how worn it is, how unusual, how agressive we want to discard
+		# calculate discard score, if over threshold discard
+
+		age = self._age_score(shade)
+		outlier = self._outlier_score(shade)
+
+		score = AGE_SCORE_WEIGHT * age + OUTLIER_WEIGHT * outlier
+
+		# Aggression > 1 means more willing to discard
+		score *= 1.0 + AGGRESSION_SCORE_WEIGHT * (aggression - 1.0)
+
+		score = max(0.0, score)
+
+		# if reach terminal shade
+		if self._is_black(shade):
+			if shade == 64:
+				score += TERMINAL_DISCARD_SCORE
+		else:
+			if shade == 127:
+				score += TERMINAL_DISCARD_SCORE
+
+		return score
+
 	def select_socks(self, offered: tuple[int, ...], turn: TurnContext) -> Selection:
 		"""Choose two socks to wear, and decide the fate of the rest.
 
@@ -213,21 +271,30 @@ class Player6(BasePlayer):
 		discard: list[int] = []
 		aggression = self._discard_aggression(turn)
 		if aggression > 0.0:
-			white_cutoff = round(WHITE_CUTOFF + 30 * (aggression - 1.0))
-			compatibility_cutoff = min(
-				MAX_COMPATIBILITY,
-				max(MIN_COMPATIBILITY, 0.08 * aggression),
-			)
 			for i, shade in enumerate(offered):
 				if i in best_pair:
 					continue
 
-				compatibility = self._compatibility(shade)
-				black = self._is_black(shade)
-				worn_out = shade == 64 if black else shade == 127
-				white_too_old = not black and shade < white_cutoff
+				score = self._discard_score(shade, aggression)
 
-				if worn_out or white_too_old or compatibility < compatibility_cutoff:
+				if score >= DISCARD_THRESHOLD:
 					discard.append(i)
+
+			# white_cutoff = round(WHITE_CUTOFF + 30 * (aggression - 1.0))
+			# compatibility_cutoff = min(
+			# 	MAX_COMPATIBILITY,
+			# 	max(MIN_COMPATIBILITY, 0.08 * aggression),
+			# )
+			# for i, shade in enumerate(offered):
+			# 	if i in best_pair:
+			# 		continue
+
+			# 	compatibility = self._compatibility(shade)
+			# 	black = self._is_black(shade)
+			# 	worn_out = shade == 64 if black else shade == 127
+			# 	white_too_old = not black and shade < white_cutoff
+
+			# 	if worn_out or white_too_old or compatibility < compatibility_cutoff:
+			# 		discard.append(i)
 
 		return Selection(wear=best_pair, discard=tuple(discard))

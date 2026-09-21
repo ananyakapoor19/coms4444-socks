@@ -54,7 +54,9 @@ def main() -> None:
 		ss_tot = np.sum((y_true - y_true.mean()) ** 2)
 		return 1 - ss_res / ss_tot
 
-	print(f'{len(rows)} rows, {len(X_train)} train / {len(X_test)} test, hidden layers {HIDDEN_LAYERS}')
+	print(
+		f'{len(rows)} rows, {len(X_train)} train / {len(X_test)} test, hidden layers {HIDDEN_LAYERS}'
+	)
 	print(f'training iterations: {model.n_iter_}')
 	for i, name in enumerate(('WHITE_MIN', 'BLACK_MAX')):
 		print(

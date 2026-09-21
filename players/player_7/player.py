@@ -51,18 +51,18 @@ class Player7(BasePlayer):
 				if diff < min_diff:
 					min_diff = diff
 					best_pair = (i, j)
-					
+
 		# Identify worn-out socks
 		discard_list = []
 		for i in range(len(offered)):
 			# Skip the ones player is wearing
 			if i in best_pair:
 				continue
-				
+
 			shade = offered[i]
 			# White socks fade down to 127, black socks fade up to 64
 			if shade == 127 or shade == 64:
 				discard_list.append(i)
-				
+
 		# Return the decision
 		return Selection(wear=best_pair, discard=tuple(discard_list))

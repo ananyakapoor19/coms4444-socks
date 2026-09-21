@@ -57,7 +57,9 @@ def _variant(white: int, black: int) -> type:
 	)
 
 
-def _evaluate(capacity: int, days: int, budget: float, white: int, black: int) -> tuple[float, float]:
+def _evaluate(
+	capacity: int, days: int, budget: float, white: int, black: int
+) -> tuple[float, float]:
 	variant = _variant(white, black)
 	engine = Engine(
 		players=[variant] * ROOMMATES,
@@ -168,7 +170,16 @@ def main() -> None:
 	with csv_path.open('w', newline='') as fh:
 		writer = csv.DictWriter(
 			fh,
-			fieldnames=['capacity', 'days', 'budget', 'white', 'black', 'embarrassment', 'spend', 'evals'],
+			fieldnames=[
+				'capacity',
+				'days',
+				'budget',
+				'white',
+				'black',
+				'embarrassment',
+				'spend',
+				'evals',
+			],
 		)
 		writer.writeheader()
 		writer.writerows(dataset)

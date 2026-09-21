@@ -70,7 +70,9 @@ def _run_cell(args: tuple[int, int]) -> dict:
 
 def main() -> None:
 	cells = [(w, b) for w in WHITE_VALUES for b in BLACK_VALUES]
-	print(f'{len(cells)} cells x {len(SEEDS)} seeds = {len(cells) * len(SEEDS)} runs', file=sys.stderr)
+	print(
+		f'{len(cells)} cells x {len(SEEDS)} seeds = {len(cells) * len(SEEDS)} runs', file=sys.stderr
+	)
 
 	results: list[dict] = []
 	with ProcessPoolExecutor() as pool:
@@ -104,7 +106,9 @@ def main() -> None:
 	import csv
 
 	with (out_dir / 'player4_threshold_sweep_fine.csv').open('w', newline='') as fh:
-		writer = csv.DictWriter(fh, fieldnames=['white', 'black', 'mean_daily_embarrassment', 'spend_per_year'])
+		writer = csv.DictWriter(
+			fh, fieldnames=['white', 'black', 'mean_daily_embarrassment', 'spend_per_year']
+		)
 		writer.writeheader()
 		writer.writerows(results)
 

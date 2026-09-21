@@ -13,11 +13,12 @@ This directory is not itself discovered - the registry only matches
 ``player_<digits>`` - so the template can never appear in a run as a competitor.
 """
 
+from collections import defaultdict, deque
+from itertools import combinations
+
 from models.player import GameContext, PlayerSnapshot, Selection, TurnContext
 from models.player import Player as BasePlayer
-from itertools import combinations
-from collections import defaultdict, deque
-from statistics import mean, pstdev
+
 
 class Player2(BasePlayer):
 	"""Rename me to Player<k>, where <k> is your group number."""
@@ -46,11 +47,14 @@ class Player2(BasePlayer):
 		self.global_history = []
 		self.local_black_history = deque(maxlen=self.running_window_size)
 		self.local_white_history = deque(maxlen=self.running_window_size)
+		self.black_history = []
+		self.white_history = []
 
 		self.embarassment_thresh = 6
 		# TODO: maybe per-color thresholds?
 		self.outlier_z = 1.5
 		self.min_dist_samples = 10
+
 	def select_socks(self, offered: tuple[int, ...], turn: TurnContext) -> Selection:
 		"""Choose two socks to wear, and decide the fate of the rest.
 
@@ -128,25 +132,17 @@ class Player2(BasePlayer):
 
 		# new_mean = (old_mean * window_size + new_value) / (window_size + 1)
 		"""
-		pairwise_sock_pairs = pairwise_sock_embarassments(offered)
-
 		# update our distribution of sock colors seen so far
-		for idx, sock_value in enumerate(offered):
+		for _idx, sock_value in enumerate(offered):
 			if sock_value > 64:
 				self.white_history.append(sock_value)
 			else:
 				self.black_history.append(sock_value)
 			self.global_history.append(sock_value)
-		
-		pairs = pairwise_sock_embarassments(offered)
-		min_embarassment = min([p["embarrassment"] for p in pairs])
-
-
 
 		# want to track budget / spending, per day
 		self.budget_per_day.append(turn.budget_remaining)
 
-		
 		# cooperative policy - will only discard socks if we haven't been overspending as a household
 		self.days_seen += 1
 		initial_budget = turn.total_spent + turn.budget_remaining
@@ -156,8 +152,6 @@ class Player2(BasePlayer):
 		white_socks = []
 		black_socks = []
 
-
-
 		for i, sock_value in enumerate(offered[:4]):
 			# if white sock
 			if sock_value > 64:
@@ -166,17 +160,17 @@ class Player2(BasePlayer):
 			else:
 				black_socks.append(i)
 
-		
-		# # TODO: need to pick 2 socks that fall below self.embarassment_thresh
-		# if len(black_socks) >= 2:
-		# 	socks_to_wear = [black_socks[0], black_socks[1]]
-		# else:
-		# 	socks_to_wear = [white_socks[0], white_socks[1]]
+		# TODO: need to pick 2 socks that fall below self.embarassment_thresh
+		if len(black_socks) >= 2:
+			socks_to_wear = [black_socks[0], black_socks[1]]
+		else:
+			socks_to_wear = [white_socks[0], white_socks[1]]
 
 		if bool_discard_socks:
 			return Selection(wear=socks_to_wear, discard=white_socks)
 		else:
 			return Selection(wear=socks_to_wear, discard=())
+
 
 def pairwise_sock_embarassments(offered):
 	results = []
@@ -185,9 +179,7 @@ def pairwise_sock_embarassments(offered):
 		diff = abs(offered[i] - offered[j])
 		embarrassment = diff if diff > 6 else 0
 
-		results.append({
-			"pair": (i, j),
-			"shades": (offered[i], offered[j]),
-			"embarrassment": embarrassment
-		})
+		results.append(
+			{'pair': (i, j), 'shades': (offered[i], offered[j]), 'embarrassment': embarrassment}
+		)
 	return results

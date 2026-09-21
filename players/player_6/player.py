@@ -27,11 +27,11 @@ SPEND_RATE_ALPHA = 0.3
 MIN_COMPATIBILITY = 0.02
 MAX_COMPATIBILITY = 0.18
 
-# tryign to add discard score calculations 
+# tryign to add discard score calculations
 DISCARD_THRESHOLD = 1.0
-TERMINAL_DISCARD_SCORE = 3.0 
-WHITE_AGE_START = 200 
-WHITE_AGE_RANGE = 73 
+TERMINAL_DISCARD_SCORE = 3.0
+WHITE_AGE_START = 200
+WHITE_AGE_RANGE = 73
 BLACK_AGE_START = 40
 BLACK_AGE_RANGE = 24
 OUTLIER_WEIGHT = 1.0
@@ -141,7 +141,7 @@ class Player6(BasePlayer):
 		return min(2.0, pace_factor * time_factor)
 
 	def _age_score(self, shade: int) -> float:
-		# noramlized score of how worn sock is, 0 is fresh, 1 is terminal shade 
+		# noramlized score of how worn sock is, 0 is fresh, 1 is terminal shade
 
 		if self._is_black(shade):
 			age = (
@@ -156,7 +156,7 @@ class Player6(BasePlayer):
 		return min(1.0, max(0.0, age))
 
 	def _outlier_score(self, shade: int) -> float:
-		# return how unusual sock is in observed distribution 
+		# return how unusual sock is in observed distribution
 		# common low score, rare high score
 
 		compatibility = self._compatibility(shade)
@@ -173,7 +173,7 @@ class Player6(BasePlayer):
 		aggression: float,
 	) -> float:
 		# basef on how worn it is, how unusual, how agressive we want to discard
-		# calculate discard score, if over threshold discard 
+		# calculate discard score, if over threshold discard
 
 		age = self._age_score(shade)
 		outlier = self._outlier_score(shade)
@@ -190,7 +190,7 @@ class Player6(BasePlayer):
 			* (aggression - 1.0)
 		)
 
-		
+
 		score = max(0.0, score)
 
 		# if reach terminal shade
@@ -291,7 +291,7 @@ class Player6(BasePlayer):
 			for i, shade in enumerate (offered):
 
 				if i in best_pair:
-					continue 
+					continue
 
 				score = self._discard_score(shade, aggression)
 

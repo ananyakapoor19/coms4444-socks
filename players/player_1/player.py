@@ -100,15 +100,20 @@ class Player1(BasePlayer):
 		"""
 		self.days_seen += 1
 
-		socks_by_colors = sorted((sock, i) for i, sock in enumerate(offered))
-
-		best_pair = (socks_by_colors[0][1], socks_by_colors[1][1])
-		best_diff = socks_by_colors[1][0] - socks_by_colors[0][0]
+		socks_by_colors = sorted(((sock, i) for i, sock in enumerate(offered)), reverse=True)
+		
+		darkest_free_pair = None
+		best_pair = (socks_by_colors[1][1], socks_by_colors[0][1])
+		best_diff = abs(socks_by_colors[0][0] - socks_by_colors[1][0])
 		for (left, left_i), (right, right_i) in zip(socks_by_colors, socks_by_colors[1:]):
-			diff = right - left
+			diff = abs(left - right)
+			if diff <= 6:
+				darkest_free_pair = (left_i, right_i)
 			if diff < best_diff:
 				best_diff = diff
 				best_pair = (left_i, right_i)
 
-		return Selection(wear=best_pair)
+		return Selection(wear=darkest_free_pair or best_pair)
+
+
 		

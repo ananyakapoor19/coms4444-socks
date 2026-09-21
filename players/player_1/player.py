@@ -110,5 +110,16 @@ class Player1(BasePlayer):
 				best_diff = diff
 				best_pair = (left_i, right_i)
 
-		return Selection(wear=best_pair)
-		
+		threshold = self.choose_discard_threshold(turn)
+		discard = []
+		for c in range(len(offered)):
+			if c not in best_pair and offered[c] >= threshold and offered[c] <= (255 - threshold * 2):
+				discard.append(c)
+
+		return Selection(wear=best_pair, discard=tuple(discard))
+
+	def choose_discard_threshold(self, turn: TurnContext) -> float:
+		days_left = float(self.days - turn.day)
+
+		threshold = 5.0 * self.roommates * days_left / turn.budget_remaining if turn.budget_remaining > 0 else 6
+		return threshold if threshold > 6 else 6 + 4

@@ -13,22 +13,54 @@ This directory is not itself discovered - the registry only matches
 ``player_<digits>`` - so the template can never appear in a run as a competitor.
 """
 
+from dataclasses import dataclass
+from itertools import combinations
+
 from models.player import GameContext, PlayerSnapshot, Selection, TurnContext
 from models.player import Player as BasePlayer
 
-THRESHOLD = 6
-BUCKETS = 8
-HIST_DECAY = 0.985
-PACK_COST = 10.0
-WHITE_CUTOFF = 200
-ENDGAME_START = 0.8
-ENDGAME_RESERVE = 0.2
-SPEND_RATE_ALPHA = 0.3
-MIN_COMPATIBILITY = 0.02
-MAX_COMPATIBILITY = 0.18
+
+@dataclass(frozen=True)
+class SockObservation:
+	"""The day and socks offered, in their original order."""
+
+	day: int
+	offered: tuple[int, ...]
+
+	@property
+	def black_shades(self) -> tuple[int, ...]:
+		shades = []
+		for shade in self.offered:
+			if shade < 65:
+				shades.append(shade)
+		return tuple(shades)
+
+	@property
+	def white_shades(self) -> tuple[int, ...]:
+		shades = []
+		for shade in self.offered:
+			if shade >= 127:  # White socks stop fading at 127.
+				shades.append(shade)
+		return tuple(shades)
 
 
-class Player6(BasePlayer):
+class SockHistory:
+	"""A separate history for each player."""
+
+	def __init__(self) -> None:
+		self._records: list[SockObservation] = []
+
+	def record(self, *, day: int, offered: tuple[int, ...]) -> None:
+		observation = SockObservation(day=day, offered=tuple(offered))
+		self._records.append(observation)
+
+	@property
+	def records(self) -> tuple[SockObservation, ...]:
+		# Return a tuple so callers cannot change the stored list.
+		return tuple(self._records)
+
+
+class Player8(BasePlayer):
 	"""Rename me to Player<k>, where <k> is your group number."""
 
 	def __init__(self, snapshot: PlayerSnapshot, ctx: GameContext) -> None:
@@ -47,86 +79,7 @@ class Player6(BasePlayer):
 		# itself - you cannot preload state into an already-built object. Anything
 		# you want to carry between days lives on self, so initialise it here.
 		self.days_seen = 0
-		self.white_hist = [1.0] * BUCKETS
-		self.black_hist = [1.0] * BUCKETS
-		self.estimated_budget = None
-		self.last_spend = 0.0
-		self.last_spend_day = 0
-		self.recent_spend_rate = 0.0
-
-	def _is_black(self, shade: int) -> bool:
-		return shade <= 64
-
-	def _bucket(self, shade: int) -> int:
-		value = shade / 65 if self._is_black(shade) else (shade - 127) / 129
-		index = int(value * BUCKETS)
-		if index < 0:
-			return 0
-		if index >= BUCKETS:
-			return BUCKETS - 1
-		return index
-
-	def _update_histograms(self, offered: tuple[int, ...]) -> None:
-		for hist in (self.white_hist, self.black_hist):
-			for i in range(BUCKETS):
-				hist[i] *= HIST_DECAY
-
-		for shade in offered:
-			hist = self.black_hist if self._is_black(shade) else self.white_hist
-			hist[self._bucket(shade)] += 1.0
-
-	def _compatibility(self, shade: int) -> float:
-		hist = self.black_hist if self._is_black(shade) else self.white_hist
-		total = sum(hist)
-		return hist[self._bucket(shade)] / total if total else 0.0
-
-	def _embarrassment(self, a: int, b: int) -> int:
-		diff = abs(a - b)
-		return 0 if diff <= THRESHOLD else diff
-
-	def _observe_spending(self, turn: TurnContext) -> None:
-		elapsed = turn.day - self.last_spend_day
-		if elapsed > 0:
-			daily_spend = max(0.0, turn.total_spent - self.last_spend) / elapsed
-			if self.last_spend_day == 0:
-				self.recent_spend_rate = daily_spend
-			else:
-				self.recent_spend_rate = (
-					SPEND_RATE_ALPHA * daily_spend
-					+ (1.0 - SPEND_RATE_ALPHA) * self.recent_spend_rate
-				)
-		self.last_spend = turn.total_spent
-		self.last_spend_day = turn.day
-
-	def _discard_aggression(self, turn: TurnContext) -> float:
-		"""Scale discarding by time left and the household's recent spend pace."""
-		if turn.budget_remaining == float('inf'):
-			progress = turn.day / self.days if self.days else 1.0
-			return 0.75 + 0.75 * progress
-
-		current_budget = turn.total_spent + turn.budget_remaining
-		if self.estimated_budget is None or current_budget > self.estimated_budget:
-			self.estimated_budget = current_budget
-
-		reserve = self.estimated_budget * ENDGAME_RESERVE
-		spendable = turn.budget_remaining - reserve
-		if spendable < PACK_COST:
-			return 0.0
-
-		progress = turn.day / self.days if self.days else 1.0
-		days_left = max(1, self.days - turn.day + 1)
-		affordable_rate = spendable / days_left
-		if self.recent_spend_rate <= 0.0:
-			pace_factor = 1.5
-		else:
-			pace_factor = affordable_rate / self.recent_spend_rate
-		pace_factor = min(1.5, max(0.25, pace_factor))
-
-		# Time pressure rises smoothly, with an extra push during the final 20%.
-		time_factor = 0.75 + 0.5 * progress
-		if progress >= ENDGAME_START:
-			time_factor += 0.25 * ((progress - ENDGAME_START) / (1.0 - ENDGAME_START))
-		return min(2.0, pace_factor * time_factor)
+		self.history = SockHistory()
 
 	def select_socks(self, offered: tuple[int, ...], turn: TurnContext) -> Selection:
 		"""Choose two socks to wear, and decide the fate of the rest.
@@ -190,44 +143,38 @@ class Player6(BasePlayer):
 		other groups.
 		"""
 		self.days_seen += 1
-		self._update_histograms(offered)
-		self._observe_spending(turn)
+		self.history.record(day=turn.day, offered=offered)
 
-		best_pair = (0, 1)
-		best_key = None
-		for i in range(len(offered)):
-			for j in range(i + 1, len(offered)):
-				a = offered[i]
-				b = offered[j]
-				embarrassment = self._embarrassment(a, b)
-				cross_colour = self._is_black(a) != self._is_black(b)
-				closeness = abs(a - b)
-				compatibility = self._compatibility(a) + self._compatibility(b)
-				# Embarrassment is the first key, so the chosen pair always has
-				# the minimum immediate score. Later keys only break ties.
-				key = (embarrassment, cross_colour, -compatibility, closeness)
-				if best_key is None or key < best_key:
-					best_key = key
-					best_pair = (i, j)
+		# Edge cases
+		# Handle when a pair of socks cannot be made
+		n = len(offered)
+		if n == 0:
+			return Selection(wear=(), discard=())
+		if n == 1:
+			return Selection(wear=(0,), discard=())
 
-		discard: list[int] = []
-		aggression = self._discard_aggression(turn)
-		if aggression > 0.0:
-			white_cutoff = round(WHITE_CUTOFF + 30 * (aggression - 1.0))
-			compatibility_cutoff = min(
-				MAX_COMPATIBILITY,
-				max(MIN_COMPATIBILITY, 0.08 * aggression),
-			)
-			for i, shade in enumerate(offered):
-				if i in best_pair:
-					continue
+		# Finds the index pair of socks that is closest to 6
+		target = 6
+		best_pair = min(
+			combinations(range(n), 2),
+			key=lambda pair: abs(abs(offered[pair[0]] - offered[pair[1]]) - target),
+		)
 
-				compatibility = self._compatibility(shade)
-				black = self._is_black(shade)
-				worn_out = shade == 64 if black else shade == 127
-				white_too_old = not black and shade < white_cutoff
+		# Create an array of the remaining socks for discard method
+		worn = set(best_pair)
+		unworn = [i for i in range(n) if i not in worn]
 
-				if worn_out or white_too_old or compatibility < compatibility_cutoff:
+		if turn.budget_remaining == 0:
+			return Selection(wear=best_pair, discard=())
+
+		discard = []
+		for i in unworn:
+			shade = offered[i]
+			if shade <= 64:  # Black sock
+				if shade > 58:
+					discard.append(i)
+			else:  # White sock
+				if shade < 133:
 					discard.append(i)
 
 		return Selection(wear=best_pair, discard=tuple(discard))

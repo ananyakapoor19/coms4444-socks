@@ -13,11 +13,16 @@ This directory is not itself discovered - the registry only matches
 ``player_<digits>`` - so the template can never appear in a run as a competitor.
 """
 
+from itertools import combinations
+
+from core.engine import PACK_COST
 from models.player import GameContext, PlayerSnapshot, Selection, TurnContext
 from models.player import Player as BasePlayer
 
+THRESHOLD = 6
 
-class PlayerTemplate(BasePlayer):
+
+class Player10(BasePlayer):
 	"""Rename me to Player<k>, where <k> is your group number."""
 
 	def __init__(self, snapshot: PlayerSnapshot, ctx: GameContext) -> None:
@@ -36,6 +41,13 @@ class PlayerTemplate(BasePlayer):
 		# itself - you cannot preload state into an already-built object. Anything
 		# you want to carry between days lives on self, so initialise it here.
 		self.days_seen = 0
+
+	def aging(self, shade: int) -> int:
+		# check how much a sock has aged
+		if shade >= 127:  # white sock
+			return 255 - shade
+		else:  # black sock
+			return shade
 
 	def select_socks(self, offered: tuple[int, ...], turn: TurnContext) -> Selection:
 		"""Choose two socks to wear, and decide the fate of the rest.
@@ -100,7 +112,41 @@ class PlayerTemplate(BasePlayer):
 		"""
 		self.days_seen += 1
 
-		# Replace everything below with your strategy. This baseline wears the
-		# first two socks it is handed and never discards, which is the
-		# do-nothing behaviour a real strategy should beat.
-		return Selection(wear=(0, 1), discard=())
+		# check for all pairs within threshold of 6 since embarrassment is 0 for anything less than 6
+		pairs_within_threshold = [
+			p
+			for p in combinations(range(len(offered)), 2)
+			if abs(offered[p[0]] - offered[p[1]]) <= THRESHOLD
+		]
+		if pairs_within_threshold:  # if there are pairs that fall within 6
+			# take the most extreme pair like closest to 255 since we want it to become more grey and uniform - white socks
+			i, j = min(
+				pairs_within_threshold,
+				key=lambda p: self.aging(offered[p[0]]) + self.aging(offered[p[1]]),
+			)
+		else:
+			# if there are no pairs within threshold, be greedy
+			i, j = min(
+				combinations(range(len(offered)), 2),
+				key=lambda p: abs(offered[p[0]] - offered[p[1]]),
+			)
+
+		worn = (offered[i] + offered[j]) / 2
+
+		discard: list[int] = []
+		days_remaining = max(self.days - turn.day + 1, 1)
+
+		# check if we have an inf budget, otherwise we add a variable to pace our spending based on days remaining and budget remaining
+		if turn.budget_remaining == 'inf':
+			buy_pack = True
+		else:
+			daily_rate = turn.budget_remaining / days_remaining
+			buy_pack = daily_rate >= (PACK_COST / 6)
+
+		if turn.budget_remaining >= PACK_COST and buy_pack:
+			leftovers = [k for k in range(len(offered)) if k not in (i, j)]
+			worst = max(leftovers, key=lambda k: abs(offered[k] - worn))
+			if abs(offered[worst] - worn) > THRESHOLD:
+				discard.append(worst)
+
+		return Selection(wear=(i, j), discard=(tuple(discard)))

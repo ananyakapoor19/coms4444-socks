@@ -60,9 +60,7 @@ class SockHistory:
 		# Return a tuple so callers cannot change the stored list.
 		return tuple(self._records)
 
-	def recent_means(
-		self, window: int, fallback: tuple[int, ...] = ()
-	) -> tuple[float, float]:
+	def recent_means(self, window: int, fallback: tuple[int, ...] = ()) -> tuple[float, float]:
 		"""Average observed shades by colour over the last ``window`` rounds.
 
 		Use the current offer only for colours missing from those rounds.
@@ -190,9 +188,8 @@ class Player8(BasePlayer):
 		other groups.
 		"""
 		center_ratio = (
-			(self.budget_lower_ratio + self.budget_upper_ratio) / 2
-			+ self.budget_center_offset
-		)
+    		self.budget_lower_ratio + self.budget_upper_ratio
+		) / 2 + self.budget_center_offset
 		if not self.budget_lower_ratio < center_ratio < self.budget_upper_ratio:
 			raise ValueError('budget center must be strictly between the lower and upper bounds')
 		if not 0 < self.discard_aggressiveness < float('inf'):
@@ -290,7 +287,6 @@ class Player8(BasePlayer):
 
 		return Selection(wear=best_pair, discard=tuple(discard))
 
-#-------------------------------------------------------------------------------------------
 
 
 	def get_expected_budget_simplified(self, total_budget: float) -> float:

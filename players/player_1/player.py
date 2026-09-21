@@ -104,7 +104,9 @@ class Player1(BasePlayer):
 
 		best_pair = (socks_by_colors[0][1], socks_by_colors[1][1])
 		best_diff = socks_by_colors[1][0] - socks_by_colors[0][0]
-		for (left, left_i), (right, right_i) in zip(socks_by_colors, socks_by_colors[1:]):
+		for (left, left_i), (right, right_i) in zip(
+			socks_by_colors, socks_by_colors[1:], strict=False
+		):
 			diff = right - left
 			if diff < best_diff:
 				best_diff = diff
@@ -113,7 +115,11 @@ class Player1(BasePlayer):
 		threshold = self.choose_discard_threshold(turn)
 		discard = []
 		for c in range(len(offered)):
-			if c not in best_pair and offered[c] >= threshold and offered[c] <= (255 - threshold * 2):
+			if (
+				c not in best_pair
+				and offered[c] >= threshold
+				and offered[c] <= (255 - threshold * 2)
+			):
 				discard.append(c)
 
 		return Selection(wear=best_pair, discard=tuple(discard))
@@ -121,5 +127,9 @@ class Player1(BasePlayer):
 	def choose_discard_threshold(self, turn: TurnContext) -> float:
 		days_left = float(self.days - turn.day)
 
-		threshold = 5.0 * self.roommates * days_left / turn.budget_remaining if turn.budget_remaining > 0 else 6
+		threshold = (
+			5.0 * self.roommates * days_left / turn.budget_remaining
+			if turn.budget_remaining > 0
+			else 6
+		)
 		return threshold if threshold > 6 else 6 + 4

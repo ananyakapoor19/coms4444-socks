@@ -13,8 +13,6 @@ This directory is not itself discovered - the registry only matches
 ``player_<digits>`` - so the template can never appear in a run as a competitor.
 """
 
-from itertools import combinations
-
 from models.player import GameContext, PlayerSnapshot, Selection, TurnContext
 from models.player import Player as BasePlayer
 
@@ -102,22 +100,36 @@ class Player1(BasePlayer):
 		"""
 		self.days_seen += 1
 
-		# Replace everything below with your strategy. This baseline wears the
-		# first two socks it is handed and never discards, which is the
-		# do-nothing behaviour a real strategy should beat.
-		is_white = [int(sock >= 127) for sock in offered]
-		num_white = sum(is_white)
+		socks_by_colors = sorted((sock, i) for i, sock in enumerate(offered))
 
-		if num_white == 2:
-			black_indices = []
-			for index, val in enumerate(is_white):
-				if val == 0:
-					black_indices.append(index)
-			i, j = black_indices[0], black_indices[1]
-		else:
-			i, j = min(
-				combinations(range(len(offered)), 2),
-				key=lambda p: abs(offered[p[0]] - offered[p[1]]),
-			)
+		best_pair = (socks_by_colors[0][1], socks_by_colors[1][1])
+		best_diff = socks_by_colors[1][0] - socks_by_colors[0][0]
+		for (left, left_i), (right, right_i) in zip(
+			socks_by_colors, socks_by_colors[1:], strict=False
+		):
+			diff = right - left
+			if diff < best_diff:
+				best_diff = diff
+				best_pair = (left_i, right_i)
 
-		return Selection(wear=(i, j), discard=())
+		threshold = self.choose_discard_threshold(turn)
+		discard = []
+		for c in range(len(offered)):
+			if (
+				c not in best_pair
+				and offered[c] >= threshold
+				and offered[c] <= (255 - threshold * 2)
+			):
+				discard.append(c)
+
+		return Selection(wear=best_pair, discard=tuple(discard))
+
+	def choose_discard_threshold(self, turn: TurnContext) -> float:
+		days_left = float(self.days - turn.day)
+
+		threshold = (
+			5.0 * self.roommates * days_left / turn.budget_remaining
+			if turn.budget_remaining > 0
+			else 6
+		)
+		return threshold if threshold > 6 else 6 + 4

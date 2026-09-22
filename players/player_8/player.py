@@ -81,6 +81,7 @@ class SockHistory:
 
 
 class Player8(BasePlayer):
+	"""Rename me to Player<k>, where <k> is your group number."""
 
 	# 丢袜策略调参区
 	# 预算比例均相对于实际总预算，0.05 表示 5 个百分点。
@@ -124,7 +125,6 @@ class Player8(BasePlayer):
 		# you want to carry between days lives on self, so initialise it here.
 		self.days_seen = 0
 		self.history = SockHistory()
-		self.history_new = []
 
 	def select_socks(self, offered: tuple[int, ...], turn: TurnContext) -> Selection:
 		"""Choose two socks to wear, and decide the fate of the rest.
@@ -211,32 +211,11 @@ class Player8(BasePlayer):
 		if n == 1:
 			return Selection(wear=(0,), discard=())
 
-		# Get sock information (index, color, age)
-		socks = self.get_offered_sock_info(offered)
-		self.history_new.append({
-			"day": turn.day,
-			"socks": socks
-		})
-
-		# Get embarrassment score of all sock pairs
-		sock_pairs = self.calc_sock_pairs(offered, socks)
-
-		# Find all pairs with minimum embarrassment
-		minimum = min(pair["embarrassment"] for pair in sock_pairs)
-		best_pairs = [
-			pair for pair in sock_pairs
-			if pair["embarrassment"] == minimum
-		]
-
-		# Select based on embarrassment > fewest terminal socks > combined sock age
-		chosen_pair = min(
-			best_pairs,
-			key = lambda pair: (
-				pair["terminal_count"],
-				sum(pair["ages"])
-			)
+		# Finds the index pair of socks with lowest embarrassment
+		best_pair = min(
+			combinations(range(n), 2),
+			key=lambda pair: abs(offered[pair[0]] - offered[pair[1]]),
 		)
-		best_pair = chosen_pair["indices"]
 
 		# Create an array of the remaining socks for discard method
 		worn = set(best_pair)
@@ -349,34 +328,3 @@ class Player8(BasePlayer):
 
 		# We use `sin` to smoothen the expected budget
 		return 0.5 * total_budget * (1 + sin(pi / total_days * current_day + 0.5 * pi))
-
-	def get_offered_sock_info(self, offered: tuple[int, ...]) -> list:
-		socks = []
-		for i, shade in enumerate(offered):
-			if shade <= 64:
-				socks.append({
-					"index": i,
-					"color": "black",
-					"age": shade
-				})
-			else:
-				socks.append({
-					"index": i,
-					"color": "white",
-					"age": (255 - shade) // 2
-				})
-		return socks
-
-	def calc_sock_pairs(self, offered: tuple[int, ...], socks: list) -> list:
-		sock_pairs = []
-		for a, b in combinations(socks, 2):
-			difference = abs(offered[a["index"]] - offered[b["index"]])
-			embarrassment = difference if difference > 6 else 0
-
-			sock_pairs.append({
-				"indices": (a["index"], b["index"]),
-				"embarrassment": embarrassment,
-				"ages": (a["age"], b["age"]),
-				"terminal_count": int(a["age"] == 64) + int(b["age"] == 64),
-			})
-		return sock_pairs

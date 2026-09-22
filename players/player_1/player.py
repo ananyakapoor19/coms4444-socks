@@ -100,36 +100,31 @@ class Player1(BasePlayer):
 		forfeit is visible rather than silent. Your failure never affects the
 		other groups.
 		"""
+		if self.days_seen == 0:
+			self.total_budget = turn.budget_remaining
 		self.days_seen += 1
 
+		if self.is_well_clustered(turn):
+			return self.well_clustered_selection(offered, turn)
+	
 		free = [
 			(a, b)
 			for a, b in combinations(range(len(offered)), 2)
 			if abs(offered[a] - offered[b]) <= 6
 		]
+		
 		if free:
 			pair = min(free, key=lambda p: self._wears(offered[p[0]]) + self._wears(offered[p[1]]))
+		else:
+			by_shade = sorted((sock, i) for i, sock in enumerate(offered))
+			pair = (by_shade[0][1], by_shade[1][1])
+			best_diff = by_shade[1][0] - by_shade[0][0]
+			for (left, left_i), (right, right_i) in zip(by_shade, by_shade[1:]):
+				diff = right - left
+				if diff < best_diff:
+					best_diff = diff
+					pair = (left_i, right_i)
 
-			threshold = self.choose_discard_threshold(turn)
-			discard = []
-			for c in range(len(offered)):
-				if (
-					c not in pair
-					and offered[c] >= threshold
-					and offered[c] <= (255 - threshold * 2)
-				):
-					discard.append(c)
-			return Selection(wear=pair, discard=tuple(discard))
-
-		by_shade = sorted((sock, i) for i, sock in enumerate(offered))
-		pair = (by_shade[0][1], by_shade[1][1])
-		best_diff = by_shade[1][0] - by_shade[0][0]
-		for (left, left_i), (right, right_i) in zip(by_shade, by_shade[1:]):
-			diff = right - left
-			if diff < best_diff:
-				best_diff = diff
-				pair = (left_i, right_i)
-		
 		threshold = self.choose_discard_threshold(turn)
 		discard = []
 		for c in range(len(offered)):
@@ -146,6 +141,35 @@ class Player1(BasePlayer):
 		"""Return the number of wears a sock has seen, as a float."""
 		return (255 - shade) / 2 if shade > 64 else float(shade)
 
+	def is_well_clustered(self, turn: TurnContext) -> bool:
+		return self.total_budget == turn.budget_remaining
+
+	def well_clustered_selection(self, offered: tuple[int, ...], turn: TurnContext) -> Selection:
+		socks_by_colors = sorted((sock, i) for i, sock in enumerate(offered))
+		first = socks_by_colors[0][0]
+		second = socks_by_colors[1][0]
+		third = socks_by_colors[2][0]
+		fourth = socks_by_colors[3][0]
+		first_diff = second - first
+		second_diff = fourth - third
+		if first_diff <= 6 and second_diff <= 6:
+			first_off = first - 0
+			second_off = (255 - fourth) / 2
+			if first_off <= second_off:
+				i,j = (socks_by_colors[0][1], socks_by_colors[1][1])
+			else:
+				i,j = (socks_by_colors[2][1], socks_by_colors[3][1])
+		elif first_diff <= 6:
+			i, j = (socks_by_colors[0][1], socks_by_colors[1][1])
+		elif second_diff <= 6:
+			i, j = (socks_by_colors[2][1], socks_by_colors[3][1])
+		else:
+			if first_diff <= second_diff:
+				i,j = (socks_by_colors[0][1], socks_by_colors[1][1])
+			else:
+				i,j = (socks_by_colors[2][1], socks_by_colors[3][1])
+
+		return Selection(wear=(i, j))
 
 	def choose_discard_threshold(self, turn: TurnContext) -> float:
 		days_left = float(self.days - turn.day)
@@ -153,6 +177,6 @@ class Player1(BasePlayer):
 		threshold = (
 			5.0 * self.roommates * days_left / turn.budget_remaining
 			if turn.budget_remaining > 0
-			else 6
+			else 65
 		)
-		return threshold if threshold > 6 else 6 + 4
+		return threshold if threshold > 6 else 6

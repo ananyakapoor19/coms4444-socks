@@ -94,8 +94,8 @@ class Player8(BasePlayer):
 
 	# Tunable discard policy parameters
 	# All budget ratios use the actual total budget; 0.05 means 5 percentage points.
-	history_window = 10  # Previous rounds to average, excluding the current round.
-	budget_lower_ratio = -0.20  # Discard none below this lower bound.
+	history_window = 20  # Previous rounds to average, excluding the current round.
+	budget_lower_ratio = 0.00  # Discard none below this lower bound.
 	budget_upper_ratio = 0.20  # Discard two above this upper bound.
 
 	# A positive offset shifts the center right, making discards more conservative;
@@ -227,6 +227,8 @@ class Player8(BasePlayer):
 		if turn.budget_remaining == float('inf'):
 			# An unlimited budget always permits the high-budget discard count.
 			discard_count = 2
+		elif exp_budget >= total_budget:
+			discard_count = 0
 		else:
 			# B = remaining budget, E = expected budget, T = actual total budget.
 			# Delta = B - E; L = lower_ratio * T; U = upper_ratio * T.
@@ -240,7 +242,7 @@ class Player8(BasePlayer):
 				if isclose(budget_gap, boundary, rel_tol=1e-12, abs_tol=1e-9):
 					budget_gap = boundary
 					break
-			if budget_gap < lower_gap:
+			if budget_gap <= lower_gap:
 				discard_count = 0
 			elif budget_gap > upper_gap:
 				discard_count = 2
@@ -276,6 +278,14 @@ class Player8(BasePlayer):
 						else offered[i] <= white_threshold
 					)
 				]
+				if unworn:
+					worst = max(
+						unworn,
+						key=lambda i: min(
+							abs(offered[i] - offered[j]) for j in range(n) if j != i
+						),
+					)
+					unworn = [worst]
 				discard_count = 1
 
 		# Prefer unworn socks closest to the requested black/white shade targets.
@@ -295,7 +305,7 @@ class Player8(BasePlayer):
 		if day_ratio <= 0.333:
 			# At the beginning, we don't want to use any budget
 			return total_budget
-		elif day_ratio >= 0.667:
+		elif day_ratio >= 0.667: 
 			# At the final stage, we do not use any budget either
 			return 0.0
 		else:
@@ -303,7 +313,7 @@ class Player8(BasePlayer):
 			return (2 - 3 * day_ratio) * total_budget
 
 	def get_expected_budget(
-		self, total_budget: float, k1: float = 0.333, k2: float = 0.95
+		self, total_budget: float, k1: float = 0.333, k2: float = 0.95 
 	) -> float:
 		assert 0 <= k1 < k2 <= 1
 

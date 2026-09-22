@@ -334,7 +334,7 @@ class Player8(BasePlayer):
 			return (2 - 3 * day_ratio) * total_budget
 
 	def get_expected_budget(
-		self, total_budget: float, k1: float = 0.333, k2: float = 0.95 
+		self, total_budget: float, k1: float = 0.666, k2: float = 0.95 
 	) -> float:
 		assert 0 <= k1 < k2 <= 1
 

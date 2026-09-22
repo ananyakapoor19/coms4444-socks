@@ -1,0 +1,633 @@
+{
+  "revision": "8fd0f247f6de1023fbede573b1d511d402e694fc",
+  "configuration": {
+    "players": 4,
+    "budget": 120,
+    "days": 720,
+    "capacity": 40,
+    "selection_unit": 4,
+    "timeout": 1.0
+  },
+  "runs": [
+    {
+      "seed": 0,
+      "results": {
+        "parameters": {
+          "capacity": 40,
+          "roommates": 4,
+          "selection_unit": 4,
+          "days": 720
+        },
+        "total_spent": 120.0,
+        "spend_per_year": 60.0,
+        "budget": 120.0,
+        "budget_remaining": 0.0,
+        "budget_exhausted_on_day": 712,
+        "total_sockless_days": 0,
+        "total_embarrassment": 17612.0,
+        "players": [
+          {
+            "index": 0,
+            "name": "Group 3",
+            "total_embarrassment": 4004.0,
+            "mean_daily_embarrassment": 5.561111111111111,
+            "embarrassed_days": 213,
+            "sockless_days": 0
+          },
+          {
+            "index": 1,
+            "name": "Group 3",
+            "total_embarrassment": 4717.0,
+            "mean_daily_embarrassment": 6.551388888888889,
+            "embarrassed_days": 249,
+            "sockless_days": 0
+          },
+          {
+            "index": 2,
+            "name": "Group 3",
+            "total_embarrassment": 4466.0,
+            "mean_daily_embarrassment": 6.2027777777777775,
+            "embarrassed_days": 233,
+            "sockless_days": 0
+          },
+          {
+            "index": 3,
+            "name": "Group 3",
+            "total_embarrassment": 4425.0,
+            "mean_daily_embarrassment": 6.145833333333333,
+            "embarrassed_days": 219,
+            "sockless_days": 0
+          }
+        ],
+        "drawer_size": 31,
+        "drawer_composition": {
+          "white": 18,
+          "black": 13
+        },
+        "pending_discards": {
+          "white": 2,
+          "black": 7
+        },
+        "faults": []
+      }
+    },
+    {
+      "seed": 1,
+      "results": {
+        "parameters": {
+          "capacity": 40,
+          "roommates": 4,
+          "selection_unit": 4,
+          "days": 720
+        },
+        "total_spent": 120.0,
+        "spend_per_year": 60.0,
+        "budget": 120.0,
+        "budget_remaining": 0.0,
+        "budget_exhausted_on_day": 720,
+        "total_sockless_days": 0,
+        "total_embarrassment": 9904.0,
+        "players": [
+          {
+            "index": 0,
+            "name": "Group 3",
+            "total_embarrassment": 2163.0,
+            "mean_daily_embarrassment": 3.004166666666667,
+            "embarrassed_days": 138,
+            "sockless_days": 0
+          },
+          {
+            "index": 1,
+            "name": "Group 3",
+            "total_embarrassment": 2717.0,
+            "mean_daily_embarrassment": 3.7736111111111112,
+            "embarrassed_days": 152,
+            "sockless_days": 0
+          },
+          {
+            "index": 2,
+            "name": "Group 3",
+            "total_embarrassment": 2634.0,
+            "mean_daily_embarrassment": 3.658333333333333,
+            "embarrassed_days": 153,
+            "sockless_days": 0
+          },
+          {
+            "index": 3,
+            "name": "Group 3",
+            "total_embarrassment": 2390.0,
+            "mean_daily_embarrassment": 3.3194444444444446,
+            "embarrassed_days": 138,
+            "sockless_days": 0
+          }
+        ],
+        "drawer_size": 30,
+        "drawer_composition": {
+          "white": 16,
+          "black": 14
+        },
+        "pending_discards": {
+          "white": 4,
+          "black": 6
+        },
+        "faults": []
+      }
+    },
+    {
+      "seed": 2,
+      "results": {
+        "parameters": {
+          "capacity": 40,
+          "roommates": 4,
+          "selection_unit": 4,
+          "days": 720
+        },
+        "total_spent": 120.0,
+        "spend_per_year": 60.0,
+        "budget": 120.0,
+        "budget_remaining": 0.0,
+        "budget_exhausted_on_day": null,
+        "total_sockless_days": 0,
+        "total_embarrassment": 18516.0,
+        "players": [
+          {
+            "index": 0,
+            "name": "Group 3",
+            "total_embarrassment": 4724.0,
+            "mean_daily_embarrassment": 6.561111111111111,
+            "embarrassed_days": 232,
+            "sockless_days": 0
+          },
+          {
+            "index": 1,
+            "name": "Group 3",
+            "total_embarrassment": 4986.0,
+            "mean_daily_embarrassment": 6.925,
+            "embarrassed_days": 249,
+            "sockless_days": 0
+          },
+          {
+            "index": 2,
+            "name": "Group 3",
+            "total_embarrassment": 4542.0,
+            "mean_daily_embarrassment": 6.308333333333334,
+            "embarrassed_days": 237,
+            "sockless_days": 0
+          },
+          {
+            "index": 3,
+            "name": "Group 3",
+            "total_embarrassment": 4264.0,
+            "mean_daily_embarrassment": 5.9222222222222225,
+            "embarrassed_days": 226,
+            "sockless_days": 0
+          }
+        ],
+        "drawer_size": 33,
+        "drawer_composition": {
+          "black": 18,
+          "white": 15
+        },
+        "pending_discards": {
+          "white": 5,
+          "black": 2
+        },
+        "faults": []
+      }
+    },
+    {
+      "seed": 3,
+      "results": {
+        "parameters": {
+          "capacity": 40,
+          "roommates": 4,
+          "selection_unit": 4,
+          "days": 720
+        },
+        "total_spent": 120.0,
+        "spend_per_year": 60.0,
+        "budget": 120.0,
+        "budget_remaining": 0.0,
+        "budget_exhausted_on_day": null,
+        "total_sockless_days": 0,
+        "total_embarrassment": 16538.0,
+        "players": [
+          {
+            "index": 0,
+            "name": "Group 3",
+            "total_embarrassment": 4070.0,
+            "mean_daily_embarrassment": 5.652777777777778,
+            "embarrassed_days": 222,
+            "sockless_days": 0
+          },
+          {
+            "index": 1,
+            "name": "Group 3",
+            "total_embarrassment": 4019.0,
+            "mean_daily_embarrassment": 5.581944444444445,
+            "embarrassed_days": 203,
+            "sockless_days": 0
+          },
+          {
+            "index": 2,
+            "name": "Group 3",
+            "total_embarrassment": 4279.0,
+            "mean_daily_embarrassment": 5.9430555555555555,
+            "embarrassed_days": 209,
+            "sockless_days": 0
+          },
+          {
+            "index": 3,
+            "name": "Group 3",
+            "total_embarrassment": 4170.0,
+            "mean_daily_embarrassment": 5.791666666666667,
+            "embarrassed_days": 215,
+            "sockless_days": 0
+          }
+        ],
+        "drawer_size": 36,
+        "drawer_composition": {
+          "white": 18,
+          "black": 18
+        },
+        "pending_discards": {
+          "white": 2,
+          "black": 2
+        },
+        "faults": []
+      }
+    },
+    {
+      "seed": 4,
+      "results": {
+        "parameters": {
+          "capacity": 40,
+          "roommates": 4,
+          "selection_unit": 4,
+          "days": 720
+        },
+        "total_spent": 110.0,
+        "spend_per_year": 55.0,
+        "budget": 120.0,
+        "budget_remaining": 10.0,
+        "budget_exhausted_on_day": null,
+        "total_sockless_days": 0,
+        "total_embarrassment": 8212.0,
+        "players": [
+          {
+            "index": 0,
+            "name": "Group 3",
+            "total_embarrassment": 1931.0,
+            "mean_daily_embarrassment": 2.6819444444444445,
+            "embarrassed_days": 106,
+            "sockless_days": 0
+          },
+          {
+            "index": 1,
+            "name": "Group 3",
+            "total_embarrassment": 1995.0,
+            "mean_daily_embarrassment": 2.7708333333333335,
+            "embarrassed_days": 102,
+            "sockless_days": 0
+          },
+          {
+            "index": 2,
+            "name": "Group 3",
+            "total_embarrassment": 2150.0,
+            "mean_daily_embarrassment": 2.986111111111111,
+            "embarrassed_days": 111,
+            "sockless_days": 0
+          },
+          {
+            "index": 3,
+            "name": "Group 3",
+            "total_embarrassment": 2136.0,
+            "mean_daily_embarrassment": 2.966666666666667,
+            "embarrassed_days": 105,
+            "sockless_days": 0
+          }
+        ],
+        "drawer_size": 35,
+        "drawer_composition": {
+          "white": 16,
+          "black": 19
+        },
+        "pending_discards": {
+          "white": 4,
+          "black": 1
+        },
+        "faults": []
+      }
+    },
+    {
+      "seed": 5,
+      "results": {
+        "parameters": {
+          "capacity": 40,
+          "roommates": 4,
+          "selection_unit": 4,
+          "days": 720
+        },
+        "total_spent": 120.0,
+        "spend_per_year": 60.0,
+        "budget": 120.0,
+        "budget_remaining": 0.0,
+        "budget_exhausted_on_day": null,
+        "total_sockless_days": 0,
+        "total_embarrassment": 14978.0,
+        "players": [
+          {
+            "index": 0,
+            "name": "Group 3",
+            "total_embarrassment": 3552.0,
+            "mean_daily_embarrassment": 4.933333333333334,
+            "embarrassed_days": 177,
+            "sockless_days": 0
+          },
+          {
+            "index": 1,
+            "name": "Group 3",
+            "total_embarrassment": 3831.0,
+            "mean_daily_embarrassment": 5.320833333333334,
+            "embarrassed_days": 181,
+            "sockless_days": 0
+          },
+          {
+            "index": 2,
+            "name": "Group 3",
+            "total_embarrassment": 3979.0,
+            "mean_daily_embarrassment": 5.526388888888889,
+            "embarrassed_days": 180,
+            "sockless_days": 0
+          },
+          {
+            "index": 3,
+            "name": "Group 3",
+            "total_embarrassment": 3616.0,
+            "mean_daily_embarrassment": 5.022222222222222,
+            "embarrassed_days": 175,
+            "sockless_days": 0
+          }
+        ],
+        "drawer_size": 35,
+        "drawer_composition": {
+          "black": 17,
+          "white": 18
+        },
+        "pending_discards": {
+          "white": 2,
+          "black": 3
+        },
+        "faults": []
+      }
+    },
+    {
+      "seed": 6,
+      "results": {
+        "parameters": {
+          "capacity": 40,
+          "roommates": 4,
+          "selection_unit": 4,
+          "days": 720
+        },
+        "total_spent": 120.0,
+        "spend_per_year": 60.0,
+        "budget": 120.0,
+        "budget_remaining": 0.0,
+        "budget_exhausted_on_day": null,
+        "total_sockless_days": 0,
+        "total_embarrassment": 18285.0,
+        "players": [
+          {
+            "index": 0,
+            "name": "Group 3",
+            "total_embarrassment": 4032.0,
+            "mean_daily_embarrassment": 5.6,
+            "embarrassed_days": 190,
+            "sockless_days": 0
+          },
+          {
+            "index": 1,
+            "name": "Group 3",
+            "total_embarrassment": 4591.0,
+            "mean_daily_embarrassment": 6.376388888888889,
+            "embarrassed_days": 209,
+            "sockless_days": 0
+          },
+          {
+            "index": 2,
+            "name": "Group 3",
+            "total_embarrassment": 4715.0,
+            "mean_daily_embarrassment": 6.548611111111111,
+            "embarrassed_days": 214,
+            "sockless_days": 0
+          },
+          {
+            "index": 3,
+            "name": "Group 3",
+            "total_embarrassment": 4947.0,
+            "mean_daily_embarrassment": 6.870833333333334,
+            "embarrassed_days": 217,
+            "sockless_days": 0
+          }
+        ],
+        "drawer_size": 35,
+        "drawer_composition": {
+          "white": 18,
+          "black": 17
+        },
+        "pending_discards": {
+          "white": 2,
+          "black": 3
+        },
+        "faults": []
+      }
+    },
+    {
+      "seed": 7,
+      "results": {
+        "parameters": {
+          "capacity": 40,
+          "roommates": 4,
+          "selection_unit": 4,
+          "days": 720
+        },
+        "total_spent": 110.0,
+        "spend_per_year": 55.0,
+        "budget": 120.0,
+        "budget_remaining": 10.0,
+        "budget_exhausted_on_day": null,
+        "total_sockless_days": 0,
+        "total_embarrassment": 9994.0,
+        "players": [
+          {
+            "index": 0,
+            "name": "Group 3",
+            "total_embarrassment": 2248.0,
+            "mean_daily_embarrassment": 3.1222222222222222,
+            "embarrassed_days": 105,
+            "sockless_days": 0
+          },
+          {
+            "index": 1,
+            "name": "Group 3",
+            "total_embarrassment": 2595.0,
+            "mean_daily_embarrassment": 3.6041666666666665,
+            "embarrassed_days": 140,
+            "sockless_days": 0
+          },
+          {
+            "index": 2,
+            "name": "Group 3",
+            "total_embarrassment": 2637.0,
+            "mean_daily_embarrassment": 3.6625,
+            "embarrassed_days": 126,
+            "sockless_days": 0
+          },
+          {
+            "index": 3,
+            "name": "Group 3",
+            "total_embarrassment": 2514.0,
+            "mean_daily_embarrassment": 3.4916666666666667,
+            "embarrassed_days": 131,
+            "sockless_days": 0
+          }
+        ],
+        "drawer_size": 32,
+        "drawer_composition": {
+          "black": 17,
+          "white": 15
+        },
+        "pending_discards": {
+          "white": 5,
+          "black": 3
+        },
+        "faults": []
+      }
+    },
+    {
+      "seed": 8,
+      "results": {
+        "parameters": {
+          "capacity": 40,
+          "roommates": 4,
+          "selection_unit": 4,
+          "days": 720
+        },
+        "total_spent": 120.0,
+        "spend_per_year": 60.0,
+        "budget": 120.0,
+        "budget_remaining": 0.0,
+        "budget_exhausted_on_day": 708,
+        "total_sockless_days": 0,
+        "total_embarrassment": 16363.0,
+        "players": [
+          {
+            "index": 0,
+            "name": "Group 3",
+            "total_embarrassment": 3879.0,
+            "mean_daily_embarrassment": 5.3875,
+            "embarrassed_days": 232,
+            "sockless_days": 0
+          },
+          {
+            "index": 1,
+            "name": "Group 3",
+            "total_embarrassment": 4348.0,
+            "mean_daily_embarrassment": 6.038888888888889,
+            "embarrassed_days": 218,
+            "sockless_days": 0
+          },
+          {
+            "index": 2,
+            "name": "Group 3",
+            "total_embarrassment": 3988.0,
+            "mean_daily_embarrassment": 5.538888888888889,
+            "embarrassed_days": 205,
+            "sockless_days": 0
+          },
+          {
+            "index": 3,
+            "name": "Group 3",
+            "total_embarrassment": 4148.0,
+            "mean_daily_embarrassment": 5.761111111111111,
+            "embarrassed_days": 230,
+            "sockless_days": 0
+          }
+        ],
+        "drawer_size": 31,
+        "drawer_composition": {
+          "white": 12,
+          "black": 19
+        },
+        "pending_discards": {
+          "white": 8,
+          "black": 1
+        },
+        "faults": []
+      }
+    },
+    {
+      "seed": 9,
+      "results": {
+        "parameters": {
+          "capacity": 40,
+          "roommates": 4,
+          "selection_unit": 4,
+          "days": 720
+        },
+        "total_spent": 110.0,
+        "spend_per_year": 55.0,
+        "budget": 120.0,
+        "budget_remaining": 10.0,
+        "budget_exhausted_on_day": null,
+        "total_sockless_days": 0,
+        "total_embarrassment": 13785.0,
+        "players": [
+          {
+            "index": 0,
+            "name": "Group 3",
+            "total_embarrassment": 3345.0,
+            "mean_daily_embarrassment": 4.645833333333333,
+            "embarrassed_days": 191,
+            "sockless_days": 0
+          },
+          {
+            "index": 1,
+            "name": "Group 3",
+            "total_embarrassment": 3536.0,
+            "mean_daily_embarrassment": 4.911111111111111,
+            "embarrassed_days": 187,
+            "sockless_days": 0
+          },
+          {
+            "index": 2,
+            "name": "Group 3",
+            "total_embarrassment": 3478.0,
+            "mean_daily_embarrassment": 4.830555555555556,
+            "embarrassed_days": 187,
+            "sockless_days": 0
+          },
+          {
+            "index": 3,
+            "name": "Group 3",
+            "total_embarrassment": 3426.0,
+            "mean_daily_embarrassment": 4.758333333333334,
+            "embarrassed_days": 188,
+            "sockless_days": 0
+          }
+        ],
+        "drawer_size": 32,
+        "drawer_composition": {
+          "black": 17,
+          "white": 15
+        },
+        "pending_discards": {
+          "white": 5,
+          "black": 3
+        },
+        "faults": []
+      }
+    }
+  ]
+}

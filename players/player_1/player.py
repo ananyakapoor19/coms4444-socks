@@ -106,20 +106,20 @@ class Player1(BasePlayer):
 
 		if self.is_well_clustered(turn):
 			return self.well_clustered_selection(offered, turn)
-	
+
 		free = [
 			(a, b)
 			for a, b in combinations(range(len(offered)), 2)
 			if abs(offered[a] - offered[b]) <= 6
 		]
-		
+
 		if free:
 			pair = min(free, key=lambda p: self._wears(offered[p[0]]) + self._wears(offered[p[1]]))
 		else:
 			by_shade = sorted((sock, i) for i, sock in enumerate(offered))
 			pair = (by_shade[0][1], by_shade[1][1])
 			best_diff = by_shade[1][0] - by_shade[0][0]
-			for (left, left_i), (right, right_i) in zip(by_shade, by_shade[1:]):
+			for (left, left_i), (right, right_i) in zip(by_shade, by_shade[1:], strict=False):
 				diff = right - left
 				if diff < best_diff:
 					best_diff = diff
@@ -128,11 +128,7 @@ class Player1(BasePlayer):
 		threshold = self.choose_discard_threshold(turn)
 		discard = []
 		for c in range(len(offered)):
-			if (
-				c not in pair
-				and offered[c] >= threshold
-				and offered[c] <= (255 - threshold * 2)
-			):
+			if c not in pair and offered[c] >= threshold and offered[c] <= (255 - threshold * 2):
 				discard.append(c)
 		return Selection(wear=pair, discard=tuple(discard))
 
@@ -156,18 +152,18 @@ class Player1(BasePlayer):
 			first_off = first - 0
 			second_off = (255 - fourth) / 2
 			if first_off <= second_off:
-				i,j = (socks_by_colors[0][1], socks_by_colors[1][1])
+				i, j = (socks_by_colors[0][1], socks_by_colors[1][1])
 			else:
-				i,j = (socks_by_colors[2][1], socks_by_colors[3][1])
+				i, j = (socks_by_colors[2][1], socks_by_colors[3][1])
 		elif first_diff <= 6:
 			i, j = (socks_by_colors[0][1], socks_by_colors[1][1])
 		elif second_diff <= 6:
 			i, j = (socks_by_colors[2][1], socks_by_colors[3][1])
 		else:
 			if first_diff <= second_diff:
-				i,j = (socks_by_colors[0][1], socks_by_colors[1][1])
+				i, j = (socks_by_colors[0][1], socks_by_colors[1][1])
 			else:
-				i,j = (socks_by_colors[2][1], socks_by_colors[3][1])
+				i, j = (socks_by_colors[2][1], socks_by_colors[3][1])
 
 		return Selection(wear=(i, j))
 

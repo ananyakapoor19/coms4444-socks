@@ -141,31 +141,27 @@ class Player1(BasePlayer):
 		return self.total_budget == turn.budget_remaining
 
 	def well_clustered_selection(self, offered: tuple[int, ...], turn: TurnContext) -> Selection:
-		socks_by_colors = sorted((sock, i) for i, sock in enumerate(offered))
-		first = socks_by_colors[0][0]
-		second = socks_by_colors[1][0]
-		third = socks_by_colors[2][0]
-		fourth = socks_by_colors[3][0]
-		first_diff = second - first
-		second_diff = fourth - third
-		if first_diff <= 6 and second_diff <= 6:
-			first_off = first - 0
-			second_off = (255 - fourth) / 2
-			if first_off <= second_off:
-				i, j = (socks_by_colors[0][1], socks_by_colors[1][1])
-			else:
-				i, j = (socks_by_colors[2][1], socks_by_colors[3][1])
-		elif first_diff <= 6:
-			i, j = (socks_by_colors[0][1], socks_by_colors[1][1])
-		elif second_diff <= 6:
-			i, j = (socks_by_colors[2][1], socks_by_colors[3][1])
-		else:
-			if first_diff <= second_diff:
-				i, j = (socks_by_colors[0][1], socks_by_colors[1][1])
-			else:
-				i, j = (socks_by_colors[2][1], socks_by_colors[3][1])
+		by_shade = sorted((sock, i) for i, sock in enumerate(offered))
+		(darkest, darkest_i), (dark_next, dark_next_i) = by_shade[0], by_shade[1]
+		(light_next, light_next_i), (lightest, lightest_i) = by_shade[-2], by_shade[-1]
 
-		return Selection(wear=(i, j))
+		dark_pair = (darkest_i, dark_next_i)
+		light_pair = (light_next_i, lightest_i)
+		dark_diff = dark_next - darkest
+		light_diff = lightest - light_next
+		dark_free = dark_diff <= 6
+		light_free = light_diff <= 6
+
+		if dark_free and light_free:
+			pair = dark_pair if self._wears(darkest) <= self._wears(lightest) else light_pair
+		elif dark_free:
+			pair = dark_pair
+		elif light_free:
+			pair = light_pair
+		else:
+			pair = dark_pair if dark_diff <= light_diff else light_pair
+
+		return Selection(wear=pair)
 
 	def choose_discard_threshold(self, turn: TurnContext) -> float:
 		days_left = float(self.days - turn.day)

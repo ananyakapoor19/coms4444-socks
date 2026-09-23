@@ -1,20 +1,20 @@
 """Group 2 player: distribution-aware sock selection.
 
-The policy has three parts, each described in ``plan.md`` and
-in ``POLICY_CHANGES.md`` next to this file:
+The policy has three parts, described in ``POLICY_CHANGES.md``:
 
 1. Track the shade distribution of the socks we have seen, per colour, over a
    sliding window using Welford's online mean/variance update.
-2. Wear the pair on offer with the least embarrassment.
-3. For the socks we did not wear, enumerate every discard subset and keep the
-   one that leaves our tracked distribution with the smallest std.
+2. Use zero-embarrassment choices to improve the projected distribution.
+3. Discard at most one leftover when a pristine replacement has lower
+   estimated matching cost, and replacement needs and budget pace allow it.
 """
 
 from collections import deque
 from itertools import combinations
-from math import sqrt
+from math import ceil, sqrt
+from statistics import mean
 
-from core.engine import PACK_COST
+from core.engine import PACK_COST, PACK_SIZE
 from models.player import GameContext, PlayerSnapshot, Selection, TurnContext
 from models.player import Player as BasePlayer
 
@@ -46,6 +46,17 @@ def aged_shade(shade: int) -> int:
 def pair_embarrassment(a: int, b: int) -> float:
 	diff = abs(a - b)
 	return float(diff) if diff > EMBARRASSMENT_THRESHOLD else 0.0
+
+
+def expected_remaining_wears(shade: float) -> float:
+	"""Expected useful wears remaining for a sock with this observed shade."""
+	terminal_wears = 1.0 / 0.25  # terminal socks survive 4 wears in expectation
+	if colour_of(int(shade)) == WHITE:
+		return (shade - WHITE_FLOOR) / WHITE_FADE + terminal_wears
+	return BLACK_CEILING - shade + terminal_wears
+
+
+EXPECTED_FRESH_WEAR_LIFETIME = 68.0
 
 
 class WindowedStats:
@@ -110,20 +121,31 @@ class Player2(BasePlayer):
 	def __init__(self, snapshot: PlayerSnapshot, ctx: GameContext) -> None:
 		super().__init__(snapshot, ctx)
 
-		# Sliding-window distribution of the shades we believe are in the
-		# drawer, tracked separately per colour. Black and white shades live in
-		# disjoint ranges (0-64 vs 127-255), so a single mixed distribution
-		# would just measure the black/white ratio rather than how well the
-		# socks within a colour match each other.
+		# Projected post-action shade distribution used only for zero-cost pair
+		# tie-breaking. This is deliberately separate from raw observations.
 		self.running_window_size = 20
 		self.stats: dict[str, WindowedStats] = {
 			WHITE: WindowedStats(self.running_window_size),
 			BLACK: WindowedStats(self.running_window_size),
 		}
 
-		# Do not discard socks of a colour until we have seen at least this
-		# many of them - a std over two or three samples says nothing.
+		# Raw shades actually offered to us. The discard policy uses these
+		# observations rather than our own hypothetical post-action state.
+		self.raw_window_size = 40
+		self.raw_history: dict[str, deque[float]] = {
+			WHITE: deque(maxlen=self.raw_window_size),
+			BLACK: deque(maxlen=self.raw_window_size),
+		}
+
+		# Discard-policy knobs. The reserve calculation is deliberately
+		# conservative because we cannot observe the true drawer size.
 		self.min_dist_samples = 10
+		self.max_discards = 1
+		# Require a meaningful improvement in expected thresholded shade gap.
+		self.replacement_gain_threshold = float(EMBARRASSMENT_THRESHOLD)
+		self.reserve_capacity_buffer = 4
+		self.reserve_safety_packs = 2
+		self.budget_pace_margin = 0.05
 
 		# Diagnostics, one entry per day: the min and mean embarrassment over
 		# all pairs in ``offered``, a proxy for how well-matched the drawer is,
@@ -139,6 +161,10 @@ class Player2(BasePlayer):
 		self.days_seen += 1
 		self.budget_per_day.append(turn.budget_remaining)
 
+		# Record every shade we actually observed before making a decision.
+		for shade in offered:
+			self.raw_history[colour_of(shade)].append(float(shade))
+
 		# 1. Pairwise embarrassment of everything we were handed. This gauges
 		#    the drawer's distribution over time and drives the wear choice.
 		pairs = pairwise_sock_embarassments(offered)
@@ -153,8 +179,8 @@ class Player2(BasePlayer):
 		wear = self.choose_pair(offered, pairs)
 		leftovers = [i for i in range(len(offered)) if i not in wear]
 
-		# 3. Among every discard subset of the leftovers, keep the one that
-		#    leaves our tracked distribution with the smallest std.
+		# 3. Replace at most one leftover whose pristine replacement is better
+		#    matched to observations, subject to the existing reserve and pace.
 		discard = self.choose_discards(offered, wear, leftovers, turn)
 
 		# Commit the chosen action to the real distribution: worn socks come
@@ -201,18 +227,51 @@ class Player2(BasePlayer):
 		assert best_pair is not None
 		return best_pair
 
-	def can_discard(self, turn: TurnContext) -> bool:
-		"""Cooperative budget guard: only discard while the household is on or
-		under its average spending pace and can still afford a six-pack.
+	def expected_replacement_reserve(self, turn: TurnContext) -> float:
+		"""Estimate budget that should be protected for unavoidable future holes.
 
-		With no ``--budget`` both ``budget_remaining`` and the pace threshold
-		are ``inf``, so discarding is always allowed on an unlimited run.
+		We cannot observe the true drawer size, so approximate it from the initial
+		capacity minus a small safety buffer. Recent raw shade observations estimate
+		how much wear remains in each colour. This is a guardrail, not an exact
+		state reconstruction.
 		"""
-		if turn.budget_remaining < PACK_COST:
+		estimated_per_colour = max(1.0, (self.capacity - self.reserve_capacity_buffer) / 2)
+		estimated_services = 0.0
+		for colour in (WHITE, BLACK):
+			history = self.raw_history[colour]
+			avg_life = (
+				mean(expected_remaining_wears(shade) for shade in history)
+				if history
+				else EXPECTED_FRESH_WEAR_LIFETIME
+			)
+			estimated_services += estimated_per_colour * avg_life
+
+		remaining_days = self.days - turn.day + 1
+		remaining_demand = 2 * self.roommates * remaining_days
+		fresh_wears_needed = max(0.0, remaining_demand - estimated_services)
+		wears_per_pack = EXPECTED_FRESH_WEAR_LIFETIME * PACK_SIZE
+		packs_needed = ceil(fresh_wears_needed / wears_per_pack)
+		return PACK_COST * (packs_needed + self.reserve_safety_packs)
+
+	def can_discard(self, turn: TurnContext) -> bool:
+		"""Whether replacement reserve and budget pace permit a discard."""
+		# With five offered socks, matching is already easy in our tests and
+		# voluntary discards only hurt, so preserve inventory.
+		if self.selection_unit >= 5:
 			return False
+
+		if turn.budget_remaining < self.expected_replacement_reserve(turn):
+			return False
+
 		initial_budget = turn.total_spent + turn.budget_remaining
-		pace = initial_budget / self.days
-		return turn.total_spent / turn.day <= pace
+		if initial_budget == float('inf'):
+			return True
+		if initial_budget <= 0:
+			return False
+
+		budget_fraction = turn.budget_remaining / initial_budget
+		time_fraction = max(0.0, (self.days - turn.day) / self.days)
+		return budget_fraction - time_fraction > self.budget_pace_margin
 
 	def choose_discards(
 		self,
@@ -221,28 +280,41 @@ class Player2(BasePlayer):
 		leftovers: list[int],
 		turn: TurnContext,
 	) -> tuple[int, ...]:
+		"""Compare keeping each leftover with its eventual pristine replacement.
+
+		Average the engine's thresholded mismatch against recent raw shades of
+		the same colour. A symmetric outlier score can discard a young sock that
+		will age into the population, only to buy another equally young sock.
+		Instead require replacement to reduce the estimated mismatch by >6.
+
+		This is a local proxy, not a prediction of our best pair in a future
+		hand. Replacement is delayed until six household discards accumulate;
+		the reserve/pace guards remain necessary and are not survival guarantees.
+		"""
 		if not leftovers or not self.can_discard(turn):
 			return ()
 
-		# A leftover is only eligible for discard once we have enough samples
-		# of its colour to trust the std.
-		eligible = [
-			i for i in leftovers if self.stats[colour_of(offered[i])].n >= self.min_dist_samples
-		]
+		candidates: list[tuple[float, int]] = []
+		for i in leftovers:
+			shade = offered[i]
+			history = self.raw_history[colour_of(shade)]
+			if len(history) < self.min_dist_samples:
+				continue
 
-		best_action: tuple[int, ...] = ()
-		best_key: tuple[float, int] | None = None
-		for r in range(len(eligible) + 1):
-			for subset in combinations(eligible, r):
-				trial = {c: s.copy() for c, s in self.stats.items()}
-				self.apply_action(trial, offered, wear, leftovers, subset)
-				total_std = sum(s.std for s in trial.values())
-				# Ties go to the cheaper action (fewer discards).
-				key = (total_std, len(subset))
-				if best_key is None or key < best_key:
-					best_key = key
-					best_action = subset
-		return tuple(sorted(best_action))
+			pristine = 255 if colour_of(shade) == WHITE else 0
+			gain = mean(
+				pair_embarrassment(shade, observed) - pair_embarrassment(pristine, observed)
+				for observed in history
+			)
+			if gain > self.replacement_gain_threshold:
+				candidates.append((gain, i))
+
+		if not candidates:
+			return ()
+
+		# Rank improvements; lower index breaks exact ties. Default limit is one.
+		ranked = sorted(candidates, key=lambda item: (-item[0], item[1]))
+		return tuple(index for _, index in ranked[: self.max_discards])
 
 	@staticmethod
 	def apply_action(

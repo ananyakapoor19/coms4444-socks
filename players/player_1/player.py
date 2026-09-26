@@ -104,33 +104,26 @@ class Player1(BasePlayer):
 			self.total_budget = turn.budget_remaining
 		self.days_seen += 1
 
+		# if offered = [0, 1, 255, 253] 
+		# then wear_scores = [0, 1, 0, 1]
+		# by_shade = [(0, 0), (1, 1), (253, 3), (255, 2)]
+		# and selected_pair = (0, 1) 
+		# because the first two socks are closest in shade and have the lowest wear scores
+		# although this also means black socks are preferred over white socks due to less color difference despite the same wear scores
+
+		by_shade = sorted((sock, i) for i, sock in enumerate(offered))
+		wear_scores = [self._wears(sock) for sock in offered]
+
 		if self.is_well_clustered(turn):
-			return self.well_clustered_selection(offered, turn)
+			return self.well_clustered_selection(by_shade, wear_scores, turn)
 
-		free = [
-			(a, b)
-			for a, b in combinations(range(len(offered)), 2)
-			if abs(offered[a] - offered[b]) <= 6
-		]
-
-		if free:
-			pair = min(free, key=lambda p: self._wears(offered[p[0]]) + self._wears(offered[p[1]]))
-		else:
-			by_shade = sorted((sock, i) for i, sock in enumerate(offered))
-			pair = (by_shade[0][1], by_shade[1][1])
-			best_diff = by_shade[1][0] - by_shade[0][0]
-			for (left, left_i), (right, right_i) in zip(by_shade, by_shade[1:], strict=False):
-				diff = right - left
-				if diff < best_diff:
-					best_diff = diff
-					pair = (left_i, right_i)
-
+		selected_pair = self.select_pair(by_shade, wear_scores)
 		threshold = self.choose_discard_threshold(turn)
 		discard = []
 		for c in range(len(offered)):
-			if c not in pair and offered[c] >= threshold and offered[c] <= (255 - threshold * 2):
+			if c not in selected_pair and offered[c] >= threshold and offered[c] <= (255 - threshold * 2):
 				discard.append(c)
-		return Selection(wear=pair, discard=tuple(discard))
+		return Selection(wear=selected_pair, discard=tuple(discard))
 
 	@staticmethod
 	def _wears(shade: int) -> float:
@@ -140,8 +133,31 @@ class Player1(BasePlayer):
 	def is_well_clustered(self, turn: TurnContext) -> bool:
 		return self.total_budget == turn.budget_remaining
 
-	def well_clustered_selection(self, offered: tuple[int, ...], turn: TurnContext) -> Selection:
-		by_shade = sorted((sock, i) for i, sock in enumerate(offered))
+	def select_pair(self, by_shade: list[tuple[int, int]], wear_scores: list[float]) -> tuple[int, int]:
+		pair = (by_shade[0][1], by_shade[1][1])
+		best_diff = by_shade[1][0] - by_shade[0][0]
+		pair_wear_score = wear_scores[pair[0]] + wear_scores[pair[1]]
+
+		for (left, left_i), (right, right_i) in zip(by_shade, by_shade[1:], strict=False):
+			diff = right - left
+			current_pair_wear_score = wear_scores[left_i] + wear_scores[right_i]
+
+			# wear score as tiebreaker
+			# if there's no ties choose least embarassment
+			# if there's a tie choose least wear score (newest socks)
+			if best_diff <= 6 and diff <= 6 or best_diff == diff:
+				if current_pair_wear_score < pair_wear_score:
+					best_diff = diff
+					pair = (left_i, right_i)
+					pair_wear_score = current_pair_wear_score
+			elif diff < best_diff:
+				best_diff = diff
+				pair = (left_i, right_i)
+				pair_wear_score = current_pair_wear_score
+
+		return pair
+
+	def well_clustered_selection(self, by_shade: list[tuple[int, int]], wear_scores: list[float], turn: TurnContext) -> Selection:
 		(darkest, darkest_i), (dark_next, dark_next_i) = by_shade[0], by_shade[1]
 		(light_next, light_next_i), (lightest, lightest_i) = by_shade[-2], by_shade[-1]
 
@@ -153,7 +169,7 @@ class Player1(BasePlayer):
 		light_free = light_diff <= 6
 
 		if dark_free and light_free:
-			pair = dark_pair if self._wears(darkest) <= self._wears(lightest) else light_pair
+			pair = dark_pair if wear_scores[darkest_i] <= wear_scores[lightest_i] else light_pair
 		elif dark_free:
 			pair = dark_pair
 		elif light_free:
@@ -162,6 +178,9 @@ class Player1(BasePlayer):
 			pair = dark_pair if dark_diff <= light_diff else light_pair
 
 		return Selection(wear=pair)
+
+
+
 
 	def choose_discard_threshold(self, turn: TurnContext) -> float:
 		days_left = float(self.days - turn.day)

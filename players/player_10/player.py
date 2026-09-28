@@ -14,6 +14,7 @@ This directory is not itself discovered - the registry only matches
 """
 
 import math
+import sys
 from itertools import combinations
 
 from core.engine import PACK_COST
@@ -21,14 +22,15 @@ from models.player import GameContext, PlayerSnapshot, Selection, TurnContext
 from models.player import Player as BasePlayer
 
 THRESHOLD = 6
+AGE_CUT_LOW = 3
+AGE_CUT_MID = 7
+AGE_CUT_HIGH = 15
+USABLE_FRAC = 0.85
 
 
 class Player10(BasePlayer):
-	"""Rename me to Player<k>, where <k> is your group number."""
-
 	def __init__(self, snapshot: PlayerSnapshot, ctx: GameContext) -> None:
 		super().__init__(snapshot, ctx)
-
 		# super() has already set these from ctx and snapshot:
 		#
 		#   self.index           which roommate you are (0-based)
@@ -41,15 +43,13 @@ class Player10(BasePlayer):
 		# The engine constructs you once, before day 1, and it constructs you
 		# itself - you cannot preload state into an already-built object. Anything
 		# you want to carry between days lives on self, so initialise it here.
-		self.days_seen = 0
-		self.replacements_seen = False
 
-	def aging(self, shade: int) -> int:
-		# check how much a sock has aged
-		if shade >= 127:  # white sock
+		self.days_seen = 0
+
+	def aging(self, shade: int) -> float:
+		if shade >= 127:
 			return (255 - shade) / 2
-		else:  # black sock
-			return shade
+		return shade
 
 	def select_socks(self, offered: tuple[int, ...], turn: TurnContext) -> Selection:
 		"""Choose two socks to wear, and decide the fate of the rest.
@@ -61,22 +61,22 @@ class Player10(BasePlayer):
 
 		WHAT YOU CAN SEE
 
-			offered[i]                  the shade of the i-th sock on offer
-			turn.day                    today's day number, 1-based
-			turn.total_spent            dollars spent by the household so far
-			turn.embarrassment_history  your own daily scores, one per day
-			turn.total_embarrassment    the sum of that history
-			self.capacity / self.roommates / self.selection_unit / self.days
+		offered[i]                  the shade of the i-th sock on offer
+		turn.day                    today's day number, 1-based
+		turn.total_spent            dollars spent by the household so far
+		turn.embarrassment_history  your own daily scores, one per day
+		turn.total_embarrassment    the sum of that history
+		self.capacity / self.roommates / self.selection_unit / self.days
 
 		WHAT YOU CANNOT SEE
 
-			- Which sock is which. Indices are positions in THIS tuple only. The
-				same index tomorrow is a different sock, so you cannot track an
-				individual sock across turns or build up a map of the drawer.
-			- Anyone else's socks, choices or embarrassment.
-			- The shade distribution left in the drawer.
-			- How many socks have been discarded, or how close the household is to
-				the next six-pack. You see total_spent only, after the fact.
+		- Which sock is which. Indices are positions in THIS tuple only. The
+			same index tomorrow is a different sock, so you cannot track an
+			individual sock across turns or build up a map of the drawer.
+		- Anyone else's socks, choices or embarrassment.
+		- The shade distribution left in the drawer.
+		- How many socks have been discarded, or how close the household is to
+			the next six-pack. You see total_spent only, after the fact.
 
 		With n == 1 you are alone with the drawer, so tracking its full state IS
 		possible. That is intentional, not a leak - it is what makes the pooled
@@ -98,8 +98,8 @@ class Player10(BasePlayer):
 
 		RETURNING A DECISION
 
-			wear     exactly two distinct indices into ``offered``
-			discard  any subset of the REMAINING indices, possibly empty
+		wear     exactly two distinct indices into ``offered``
+		discard  any subset of the REMAINING indices, possibly empty
 
 		Anything you neither wear nor discard goes back in the drawer unworn and
 		keeps its shade. Only worn socks age.
@@ -112,57 +112,44 @@ class Player10(BasePlayer):
 		forfeit is visible rather than silent. Your failure never affects the
 		other groups.
 		"""
+
 		self.days_seen += 1
+		pairs = list(combinations(range(len(offered)), 2))
+		within = [p for p in pairs if abs(offered[p[0]] - offered[p[1]]) <= THRESHOLD]
+		if within:
+			i, j = min(within, key=lambda p: self.aging(offered[p[0]]) + self.aging(offered[p[1]]))
+		else:
+			i, j = min(pairs, key=lambda p: abs(offered[p[0]] - offered[p[1]]))
 
-		# check for all pairs within threshold of 6 since embarrassment is 0 for anything less than 6
-		pairs_within_threshold = [
-			p
-			for p in combinations(range(len(offered)), 2)
-			if abs(offered[p[0]] - offered[p[1]]) <= THRESHOLD
+		discard = []
+		try:
+			discard = self._choose_discards(offered, turn, i, j)
+		except Exception as e:
+			print('discard error:', repr(e), file=sys.stderr)
+
+		return Selection(wear=(i, j), discard=tuple(discard))
+
+	def _choose_discards(self, offered, turn, i, j):
+		br = turn.budget_remaining
+		if br is None or math.isinf(br):
+			age_cut = AGE_CUT_MID
+		elif br < 3 * PACK_COST:
+			return []
+		else:
+			usable = (turn.total_spent + br) * USABLE_FRAC
+			pace = turn.total_spent / usable - turn.day / self.days
+			if pace <= -0.05:
+				age_cut = AGE_CUT_LOW
+			elif pace <= 0.02:
+				age_cut = AGE_CUT_MID
+			elif pace <= 0.06:
+				age_cut = AGE_CUT_HIGH
+			else:
+				return []
+
+		fresh = min(1.0, 6 * (turn.total_spent / PACK_COST) / self.capacity)
+		age_cut *= 1.0 - 0.4 * fresh
+
+		return [
+			k for k in range(len(offered)) if k not in (i, j) and self.aging(offered[k]) >= age_cut
 		]
-		if pairs_within_threshold:  # if there are pairs that fall within 6
-			# take the most extreme pair like closest to 255 since we want it to become more grey and uniform - white socks
-			i, j = min(
-				pairs_within_threshold,
-				key=lambda p: self.aging(offered[p[0]]) + self.aging(offered[p[1]]),
-			)
-		else:
-			# if there are no pairs within threshold, be greedy
-			i, j = min(
-				combinations(range(len(offered)), 2),
-				key=lambda p: abs(offered[p[0]] - offered[p[1]]),
-			)
-
-		chosen_age = max(self.aging(offered[i]), self.aging(offered[j]))
-		if turn.total_spent > 0:
-			self.replacements_seen = True
-
-		discard: list[int] = []
-		days_remaining = max(self.days - turn.day + 1, 1)
-
-		# check if we have an inf budget, otherwise we add a variable to pace our spending based on days remaining and budget remaining
-		if turn.budget_remaining is None or turn.budget_remaining == float('inf'):
-			age_threshold = 0
-		elif turn.budget_remaining < PACK_COST:
-			age_threshold = float('inf')
-		else:
-			age_threshold = math.ceil(
-				(10 * days_remaining * self.roommates) / (3 * turn.budget_remaining)
-			)
-
-		if self.replacements_seen and turn.budget_remaining >= PACK_COST:
-			leftovers = [k for k in range(len(offered)) if k not in (i, j)]
-			# wait a week before discarding, dont want to discard too early but just put a week for now
-			if leftovers:
-				# discard socks that have ageed 15 units and are beyond threshold - need to fix this later to account more for future distribution
-				discardable = [
-					k
-					for k in leftovers
-					if self.aging(offered[k]) >= age_threshold
-					and self.aging(offered[k]) > chosen_age
-				]
-				# if you can discard something take the worst and discard it
-				if discardable:
-					discard.extend(discardable)
-
-		return Selection(wear=(i, j), discard=(tuple(discard)))

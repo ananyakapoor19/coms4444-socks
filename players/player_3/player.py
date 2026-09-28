@@ -202,7 +202,7 @@ class Player3(BasePlayer):
 	CREDIT_CAP = 10.0
 	WARMUP_DAYS = 20
 	ENDGAME_DAYS = 15
-	DRAWER_GUESS = 34
+	DRAWER_GUESS_FRACTION = 34 / 40
 
 	def __init__(self, snapshot: PlayerSnapshot, ctx: GameContext) -> None:
 		super().__init__(snapshot, ctx)
@@ -220,6 +220,9 @@ class Player3(BasePlayer):
 		# wears count, not just our two: a replacement is broken in by whoever
 		# happens to draw it.
 		self.migration_days = WEARS_TO_CAP / (2 * self.roommates)
+		# Resolved from the ratio above against this run's actual capacity.
+		# At capacity=40 (the tuned setting) this reproduces 34 exactly.
+		self.DRAWER_GUESS = self.DRAWER_GUESS_FRACTION * self.capacity
 		# Set by the controller each turn: weight of the steady-state
 		# target in the potential, and that target's per-wear survival.
 		self.alpha = 0.0

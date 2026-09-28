@@ -194,5 +194,3 @@ Lints your code and auto-fixes what it safely can.
 uv run pytest
 ```
 Runs the test suite.
-#   c o m s 4 4 4 4 p r o j e c t 1  
- 

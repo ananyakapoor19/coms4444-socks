@@ -13,8 +13,6 @@ This directory is not itself discovered - the registry only matches
 ``player_<digits>`` - so the template can never appear in a run as a competitor.
 """
 
-from itertools import combinations
-
 from models.player import GameContext, PlayerSnapshot, Selection, TurnContext
 from models.player import Player as BasePlayer
 
@@ -104,10 +102,10 @@ class Player1(BasePlayer):
 			self.total_budget = turn.budget_remaining
 		self.days_seen += 1
 
-		# if offered = [0, 1, 255, 253] 
+		# if offered = [0, 1, 255, 253]
 		# then wear_scores = [0, 1, 0, 1]
 		# by_shade = [(0, 0), (1, 1), (253, 3), (255, 2)]
-		# and selected_pair = (0, 1) 
+		# and selected_pair = (0, 1)
 		# because the first two socks are closest in shade and have the lowest wear scores
 		# although this also means black socks are preferred over white socks due to less color difference despite the same wear scores
 
@@ -119,10 +117,18 @@ class Player1(BasePlayer):
 
 		selected_pair = self.select_pair(by_shade, wear_scores)
 		threshold = self.choose_discard_threshold(turn)
+		# Calculate slightly adjusted threshold for black socks that accounts for slightly slower wear over time.
+		black_threshold = min(64.0, 6.0 + 1.5 * (threshold - 6.0)) if threshold <= 64 else 65.0
 		discard = []
 		for c in range(len(offered)):
-			if c not in selected_pair and offered[c] >= threshold and offered[c] <= (255 - threshold * 2):
+			if c in selected_pair:
+				continue
+			shade = offered[c]
+			if (shade <= 64 and shade >= black_threshold) or (
+				shade > 64 and shade <= 255 - threshold * 2
+			):
 				discard.append(c)
+
 		return Selection(wear=selected_pair, discard=tuple(discard))
 
 	@staticmethod
@@ -131,9 +137,13 @@ class Player1(BasePlayer):
 		return (255 - shade) / 2 if shade > 64 else float(shade)
 
 	def is_well_clustered(self, turn: TurnContext) -> bool:
-		return self.total_budget == turn.budget_remaining
+		if turn.budget_remaining != float('inf'):
+			return self.total_budget == turn.budget_remaining
+		return False
 
-	def select_pair(self, by_shade: list[tuple[int, int]], wear_scores: list[float]) -> tuple[int, int]:
+	def select_pair(
+		self, by_shade: list[tuple[int, int]], wear_scores: list[float]
+	) -> tuple[int, int]:
 		pair = (by_shade[0][1], by_shade[1][1])
 		best_diff = by_shade[1][0] - by_shade[0][0]
 		pair_wear_score = wear_scores[pair[0]] + wear_scores[pair[1]]
@@ -157,7 +167,9 @@ class Player1(BasePlayer):
 
 		return pair
 
-	def well_clustered_selection(self, by_shade: list[tuple[int, int]], wear_scores: list[float], turn: TurnContext) -> Selection:
+	def well_clustered_selection(
+		self, by_shade: list[tuple[int, int]], wear_scores: list[float], turn: TurnContext
+	) -> Selection:
 		(darkest, darkest_i), (dark_next, dark_next_i) = by_shade[0], by_shade[1]
 		(light_next, light_next_i), (lightest, lightest_i) = by_shade[-2], by_shade[-1]
 
@@ -179,15 +191,12 @@ class Player1(BasePlayer):
 
 		return Selection(wear=pair)
 
-
-
-
 	def choose_discard_threshold(self, turn: TurnContext) -> float:
 		days_left = float(self.days - turn.day)
 
 		threshold = (
 			5.0 * self.roommates * days_left / turn.budget_remaining
-			if turn.budget_remaining > 0
+			if turn.budget_remaining >= 10
 			else 65
 		)
 		return threshold if threshold > 6 else 6

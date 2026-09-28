@@ -1,0 +1,119 @@
+{
+  "simulator_revision": "c9b1643cea07aa4b997af61c1c01788f02f5a8e0",
+  "groups": [
+    1,
+    3,
+    4,
+    6,
+    7,
+    8,
+    9,
+    10
+  ],
+  "profiles": {
+    "initial": {
+      "family": "original",
+      "settings": {
+        "raw_window": 40,
+        "return_window": 20,
+        "min_samples": 10,
+        "gain": 6,
+        "discard_limit": 1,
+        "inventory_buffer": 4,
+        "safety_packs": 2,
+        "pace_margin": 0.05,
+        "disable_five": true
+      }
+    },
+    "original_tuned": {
+      "family": "original",
+      "settings": {
+        "raw_window": 20,
+        "return_window": 5,
+        "min_samples": 3,
+        "gain": 6,
+        "discard_limit": 2,
+        "inventory_buffer": 14,
+        "safety_packs": 6,
+        "pace_margin": 0,
+        "disable_five": true
+      }
+    },
+    "fixed_tuned": {
+      "family": "fixed",
+      "settings": {
+        "raw_window": 20,
+        "return_window": 5,
+        "min_samples": 3,
+        "gain": 6,
+        "discard_limit": 2,
+        "inventory_buffer": 14,
+        "safety_packs": 6,
+        "pace_margin": 0,
+        "disable_five": true
+      }
+    }
+  },
+  "grid": {
+    "raw_window": [
+      5,
+      10,
+      20,
+      40,
+      80,
+      160
+    ],
+    "return_window": [
+      5,
+      10,
+      20,
+      40,
+      80
+    ],
+    "min_samples": [
+      1,
+      3,
+      5,
+      10,
+      20
+    ],
+    "gain": [
+      0,
+      3,
+      6,
+      12,
+      24,
+      48
+    ],
+    "discard_limit": [
+      0,
+      1,
+      2
+    ],
+    "inventory_buffer": [
+      0,
+      2,
+      4,
+      6,
+      8,
+      10,
+      14
+    ],
+    "safety_packs": [
+      0,
+      1,
+      2,
+      4,
+      6
+    ],
+    "pace_margin": [
+      -0.05,
+      0,
+      0.025,
+      0.05,
+      0.1,
+      0.2,
+      0.3
+    ]
+  }
+}

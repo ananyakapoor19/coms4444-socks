@@ -1,4 +1,7 @@
+import math
+from bisect import bisect_left, bisect_right
 from collections import deque
+from functools import lru_cache
 from itertools import combinations
 from math import ceil, isinf, sqrt
 
@@ -22,8 +25,24 @@ def wears(shade: int) -> float:
 	return float(shade)
 
 
+def _embarrassment(a: int, b: int) -> int:
+	difference = abs(a - b)
+	return difference if difference > 6 else 0
+
+
+def _age_shade(shade: int, steps: int) -> int:
+	return max(127, shade - 2 * steps) if shade > 64 else min(64, shade + steps)
+
+
+def _gap_geometry(shades: tuple[int, ...], gap: int) -> tuple[list[int], list[int]]:
+	return (
+		[bisect_right(shades, shade - gap) for shade in shades],
+		[bisect_left(shades, shade + gap) for shade in shades],
+	)
+
+
 class Player4(BasePlayer):
-	"""Match safely and spend a paced discard allowance on genuine outliers.
+	"""Match safely and spend a paced discard allowance on future hand value.
 
 	White and black shades move at different rates, so observations are first
 	converted to wear age. Recent samples maintain a separate mean and standard
@@ -33,9 +52,8 @@ class Player4(BasePlayer):
 	The household bill lags behind discards until a same-colour group of six
 	forms. Each instance therefore counts its own requested discards immediately
 	and reserves the roommates' projected spending before claiming unused budget.
-	Up to two old-tail leftovers are discarded per turn when the saved allowance
-	supports it, pristine socks are always kept, and the last few days stop
-	recycling because replacement stock has no time to pay back.
+	Up to two leftovers are discarded per turn when the saved allowance supports
+	it, pristine socks are always kept, and the last few days stop recycling.
 
 	WHITE_MIN and BLACK_MAX remain class attributes so the existing sweep tools
 	can tune the minimum wear age. The active cutoff becomes more conservative
@@ -53,6 +71,8 @@ class Player4(BasePlayer):
 	NARROW_Z = 0.25
 	DISPERSION_SHIFT = 0.75
 	WARMUP_DAYS = 20
+	HORIZON_DAYS = 20
+	PRESERVE_BASELINE_AGE = 3.0
 
 	def __init__(self, snapshot: PlayerSnapshot, ctx: GameContext) -> None:
 		super().__init__(snapshot, ctx)
@@ -63,8 +83,60 @@ class Player4(BasePlayer):
 		}
 		self._budget: float | None = None
 		self._requested_discards = 0
+		self._observations = deque(maxlen=max(40, self.capacity))
+		self._gap_geometry = lru_cache(maxsize=512)(_gap_geometry)
 
 	def select_socks(self, offered: tuple[int, ...], turn: TurnContext) -> Selection:
+		"""Use the original selector when the budget permits frequent retirement."""
+		initial_budget = turn.total_spent + turn.budget_remaining
+		retirement_age = (
+			10 * self.roommates * self.days / (3 * initial_budget)
+			if initial_budget > 0
+			else float('inf')
+		)
+		if retirement_age <= self.PRESERVE_BASELINE_AGE:
+			return self._select_socks_baseline(offered, turn)
+
+		self._observe(offered)
+		self._observations.extend(offered)
+		allowance, _ = self._discard_policy(turn)
+		pairs = list(combinations(range(len(offered)), 2))
+		baseline_pair = min(pairs, key=lambda pair: self._pair_key(offered, pair))
+		if allowance == 0:
+			return Selection(wear=baseline_pair)
+
+		immediate_minimum = _embarrassment(*(offered[i] for i in baseline_pair))
+		values = self._future_values(offered, turn)
+		improvements = {
+			i: values[255 if shade > 64 else 0] - values[shade]
+			for i, shade in enumerate(offered)
+			if wears(shade) > 1
+		}
+		best = None
+		for pair in pairs:
+			a, b = (offered[i] for i in pair)
+			if _embarrassment(a, b) != immediate_minimum:
+				continue
+			gains = sorted(
+				(change, i)
+				for i, change in improvements.items()
+				if i not in pair and change < -1e-12
+			)[:allowance]
+			discard = tuple(i for change, i in gains)
+			key = (
+				sum(change for change, i in gains),
+				wears(a) + wears(b),
+				abs(a - b),
+				len(discard),
+				pair,
+			)
+			if best is None or key < best[0]:
+				best = (key, pair, discard)
+		_, pair, discard = best
+		self._requested_discards += len(discard)
+		return Selection(wear=pair, discard=discard)
+
+	def _select_socks_baseline(self, offered: tuple[int, ...], turn: TurnContext) -> Selection:
 		self._observe(offered)
 		discard_allowance, aggressiveness = self._discard_policy(turn)
 
@@ -95,6 +167,80 @@ class Player4(BasePlayer):
 		)
 		self._requested_discards += len(discard)
 		return Selection(wear=wear, discard=discard)
+
+	def _conditional_values(
+		self, masses: dict[int, float], targets: set[int], companions: int
+	) -> dict[int, float]:
+		"""Evaluate best-pair cost for iid companions drawn from local shade masses."""
+		items = sorted((shade, mass) for shade, mass in masses.items() if mass > 0)
+		shades = tuple(shade for shade, mass in items)
+		total = sum(mass for shade, mass in items)
+		weights = [mass / total for shade, mass in items]
+		n = len(shades)
+		values = {shade: 0.0 for shade in targets}
+		permutations = math.factorial(companions)
+		for gap in range(7, 65):
+			left, right = self._gap_geometry(shades, gap)
+			forward = [[1.0] * (n + 1)]
+			backward = [[1.0] * (n + 1)]
+			for _count in range(1, companions + 1):
+				previous = forward[-1]
+				current = [0.0] * (n + 1)
+				for i in range(n):
+					current[i + 1] = current[i] + weights[i] * previous[left[i]]
+				forward.append(current)
+				previous = backward[-1]
+				current = [0.0] * (n + 1)
+				for i in range(n - 1, -1, -1):
+					current[i] = current[i + 1] + weights[i] * previous[right[i]]
+				backward.append(current)
+			greatest_probability = 0.0
+			for shade in targets:
+				li = bisect_right(shades, shade - gap)
+				ri = bisect_left(shades, shade + gap)
+				probability = permutations * sum(
+					forward[k][li] * backward[companions - k][ri] for k in range(companions + 1)
+				)
+				greatest_probability = max(greatest_probability, probability)
+				values[shade] += (7 if gap == 7 else 1) * probability
+			if greatest_probability < 1e-14:
+				break
+		return values
+
+	def _future_values(self, offered: tuple[int, ...], turn: TurnContext) -> dict[int, float]:
+		"""Infer a future handful from this player's offers and public game fields."""
+		days_left = max(1, self.days - turn.day)
+		budget = turn.total_spent + turn.budget_remaining
+		reserve = max(self.RESERVE, budget * self.RESERVE_FRACTION)
+		replacements_per_day = max(0, turn.budget_remaining - reserve) / days_left * 0.6
+		mix = min(1.0, replacements_per_day * self.HORIZON_DAYS / self.capacity)
+		wear_rate = 2 * self.roommates
+		survival = wear_rate / (wear_rate + replacements_per_day + 0.03 * self.roommates)
+		histories = {False: {}, True: {}}
+		for shade in self._observations:
+			histogram = histories[shade > 64]
+			histogram[shade] = histogram.get(shade, 0) + 1
+		targets = set(offered) | {0, 255}
+		values = {shade: 0.0 for shade in targets}
+		shifts = (0, min(4, int(days_left * wear_rate / self.capacity)))
+		for step in shifts:
+			masses = {}
+			for white, histogram in histories.items():
+				if not histogram:
+					histogram = {255 if white else 0: 1}
+				total = sum(histogram.values())
+				for shade, mass in histogram.items():
+					future = _age_shade(shade, step)
+					masses[future] = masses.get(future, 0) + 0.5 * (1 - mix) * mass / total
+				for age in range(65):
+					shade = 255 - 2 * age if white else age
+					mass = survival**age * (1 - survival if age < 64 else 1)
+					masses[shade] = masses.get(shade, 0) + 0.5 * mix * mass
+			shifted_targets = {_age_shade(shade, step) for shade in targets}
+			projected = self._conditional_values(masses, shifted_targets, self.selection_unit - 1)
+			for shade in targets:
+				values[shade] += projected[_age_shade(shade, step)] / len(shifts)
+		return values
 
 	def _observe(self, offered: tuple[int, ...]) -> None:
 		for shade in offered:

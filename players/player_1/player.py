@@ -109,16 +109,20 @@ class Player1(BasePlayer):
 			self.previous_budget = self.total_budget
 		self.days_seen += 1
 
-		num_bought = (self.previous_budget - turn.budget_remaining) / 10
+		# num_bought = (self.previous_budget - turn.budget_remaining) / 10
+		# Can somehow use num_bought to widen range
 		self.previous_budget = turn.budget_remaining
 
-		# Can somehow use num_bought to widen range
 		black_socks = np.array(offered)[np.where(np.array(offered) <= 64)].astype(np.float64)
-		self.black_avg, self.black_range = self.estimate_age(black_socks, self.black_avg, self.black_range, 1)
+		self.black_avg, self.black_range = self.estimate_age(
+			black_socks, self.black_avg, self.black_range, 1
+		)
 		white_socks = np.array(offered)[np.where(np.array(offered) >= 127)].astype(np.float64)
-		self.white_avg, self.white_range = self.estimate_age(white_socks, self.white_avg, self.white_range, -2)
+		self.white_avg, self.white_range = self.estimate_age(
+			white_socks, self.white_avg, self.white_range, -2
+		)
 
-		# if offered = [0, 1, 255, 253] 
+		# if offered = [0, 1, 255, 253]
 		# then wear_scores = [0, 1, 0, 1]
 		# by_shade = [(0, 0), (1, 1), (253, 3), (255, 2)]
 		# and selected_pair = (0, 1)
@@ -169,14 +173,19 @@ class Player1(BasePlayer):
 			if range > previous_range:
 				range_update = range
 			else:
-				range_update = previous_range * (half_capacity - colored_socks.size) / half_capacity + range * colored_socks.size / half_capacity
+				range_update = (
+					previous_range * (half_capacity - colored_socks.size) / half_capacity
+					+ range * colored_socks.size / half_capacity
+				)
 
 			observed_age = mean * colored_socks.size / half_capacity
-			previous_observed_age = previous_age * (half_capacity - colored_socks.size) / half_capacity
+			previous_observed_age = (
+				previous_age * (half_capacity - colored_socks.size) / half_capacity
+			)
 			# Take weighted average between observed and previous observed aged and add rommmates choice
 			return previous_observed_age + observed_age + roommate_aging, range_update
 		else:
-			return previous_age +  roommate_aging, previous_range
+			return previous_age + roommate_aging, previous_range
 
 	def select_pair(
 		self, by_shade: list[tuple[int, int]], wear_scores: list[float]

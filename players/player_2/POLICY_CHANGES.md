@@ -1,10 +1,10 @@
 # Group 2: replacement-aware discards
 
-The wear rule is unchanged: choose a minimum-penalty pair; among zero-penalty
+The default wear rule is: choose a minimum-penalty pair; among zero-penalty
 pairs, prefer the one whose aging leaves the projected same-colour shade
 distributions tightest. Keep the last **5 projected returned shades per colour**.
 
-For discards, keep the last **20 observed shades per colour**. After at least
+For discards, normally keep the last **20 observed shades per colour**. After at least
 **3 observations**, compare each leftover's average mismatch with the average
 mismatch of a pristine replacement against those same observations. Mismatch
 is zero for a shade gap at most 6, otherwise the full gap. Require improvement
@@ -29,6 +29,34 @@ The selected buffer of 14 is more conservative. This remains an approximation,
 not a measurement of the drawer. Replacement waits for six losses of a colour;
 our matching calculation evaluates the eventual pristine replacement.
 These checks cannot protect shared money from other players' spending.
+
+## High-budget selection update (September 28)
+
+With four-sock hands and an initial budget of at least $400, use the last five
+observed shades per colour for both replacement estimates and wear tie-breaking.
+Among zero-embarrassment pairs, minimize the sum over the two worn socks of
+`(aged_shade - colour_mean)^2 - (shade - colour_mean)^2`. Break ties by shade
+gap, then indices. If no pair is free, keep the minimum-embarrassment rule.
+The mode is fixed on the first turn. Below $400 and with five-sock hands,
+the existing policy is unchanged. All discard thresholds and budget guards remain.
+The $400 boundary is a conservative design choice, not a tuned optimum.
+
+Against the pre-update tuned policy at `bab553b`, with capacity 28, four players,
+four-sock hands and 730 days at $400, fresh-seed mean embarrassment fell from
+155.50 to 24.43 in self-play (30 seeds), and from 904.79 to 782.59 against class
+players (1,200 games: all 120 unordered triples with repetition from Groups
+1,3,4,6,7,8,9,10, ten seeds each). Self-play averages our four players; mixed play
+scores our player. Opponents and engine were pinned to class revision `c9b1643`.
+Neither policy had sockless games or player faults in those comparisons.
+The aggregate table is in `results/high_budget_summary.csv`; its $120 rows
+use a separate fresh seed block and are unchanged by construction.
+The update improved 101/120 opponent-combination means; average finishing rank
+did not improve (2.43 to 2.44). Low-budget survival remains unresolved.
+
+The saved suites and CSVs below predate this update. The runner explicitly
+disables the new mode for those profiles to preserve their meaning. To test the
+new mode with the general runner, add `"high_budget_mode": true` to a profile's
+settings in a copy of `experiment_config.json` and pass it with `--config`.
 
 ## Tuning and results
 

@@ -42,6 +42,8 @@ def player_class(root, family, settings_json):
 	class ConfiguredPlayer2(policy.Player2):
 		def __init__(self, snapshot, ctx):
 			super().__init__(snapshot, ctx)
+			# Saved suites describe the policy before the high-budget selector.
+			self.enable_high_budget_mode = settings.get('high_budget_mode', False)
 			p = settings
 			self.raw_window_size = p['raw_window']
 			self.raw_history = {c: deque(maxlen=p['raw_window']) for c in self.raw_history}

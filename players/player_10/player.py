@@ -13,6 +13,7 @@ This directory is not itself discovered - the registry only matches
 ``player_<digits>`` - so the template can never appear in a run as a competitor.
 """
 
+import math
 from itertools import combinations
 
 from core.engine import PACK_COST
@@ -41,11 +42,12 @@ class Player10(BasePlayer):
 		# itself - you cannot preload state into an already-built object. Anything
 		# you want to carry between days lives on self, so initialise it here.
 		self.days_seen = 0
+		self.replacements_seen = False
 
 	def aging(self, shade: int) -> int:
 		# check how much a sock has aged
 		if shade >= 127:  # white sock
-			return 255 - shade
+			return (255 - shade) / 2
 		else:  # black sock
 			return shade
 
@@ -131,22 +133,36 @@ class Player10(BasePlayer):
 				key=lambda p: abs(offered[p[0]] - offered[p[1]]),
 			)
 
-		worn = (offered[i] + offered[j]) / 2
+		chosen_age = max(self.aging(offered[i]), self.aging(offered[j]))
+		if turn.total_spent > 0:
+			self.replacements_seen = True
 
 		discard: list[int] = []
 		days_remaining = max(self.days - turn.day + 1, 1)
 
 		# check if we have an inf budget, otherwise we add a variable to pace our spending based on days remaining and budget remaining
-		if turn.budget_remaining == 'inf':
-			buy_pack = True
+		if turn.budget_remaining is None or turn.budget_remaining == float('inf'):
+			age_threshold = 0
+		elif turn.budget_remaining < PACK_COST:
+			age_threshold = float('inf')
 		else:
-			daily_rate = turn.budget_remaining / days_remaining
-			buy_pack = daily_rate >= (PACK_COST / 6)
+			age_threshold = math.ceil(
+				(10 * days_remaining * self.roommates) / (3 * turn.budget_remaining)
+			)
 
-		if turn.budget_remaining >= PACK_COST and buy_pack:
+		if self.replacements_seen and turn.budget_remaining >= PACK_COST:
 			leftovers = [k for k in range(len(offered)) if k not in (i, j)]
-			worst = max(leftovers, key=lambda k: abs(offered[k] - worn))
-			if abs(offered[worst] - worn) > THRESHOLD:
-				discard.append(worst)
+			# wait a week before discarding, dont want to discard too early but just put a week for now
+			if leftovers:
+				# discard socks that have ageed 15 units and are beyond threshold - need to fix this later to account more for future distribution
+				discardable = [
+					k
+					for k in leftovers
+					if self.aging(offered[k]) >= age_threshold
+					and self.aging(offered[k]) > chosen_age
+				]
+				# if you can discard something take the worst and discard it
+				if discardable:
+					discard.extend(discardable)
 
 		return Selection(wear=(i, j), discard=(tuple(discard)))

@@ -154,10 +154,21 @@ class Player2(BasePlayer):
 		self.offered_pair_mean: list[float] = []
 		self.budget_per_day: list[float] = []
 		self.days_seen = 0
+		self.enable_high_budget_mode = True
+		self.use_raw_variance = False
 
 	# ------------------------------------------------------------------ policy
 
 	def select_socks(self, offered: tuple[int, ...], turn: TurnContext) -> Selection:
+		# Select the mode once; subsequent spending does not change it.
+		if self.days_seen == 0:
+			initial_budget = turn.total_spent + turn.budget_remaining
+			self.use_raw_variance = (
+				self.enable_high_budget_mode and self.selection_unit == 4 and initial_budget >= 400
+			)
+			if self.use_raw_variance:
+				self.raw_window_size = 5
+				self.raw_history = {c: deque(maxlen=5) for c in self.raw_history}
 		self.days_seen += 1
 		self.budget_per_day.append(turn.budget_remaining)
 
@@ -192,7 +203,10 @@ class Player2(BasePlayer):
 	def choose_pair(self, offered: tuple[int, ...], pairs: list[dict]) -> tuple[int, int]:
 		"""Use zero-cost choices to improve the projected drawer distribution.
 
-		If any pair has zero immediate embarrassment (shade gap <= 6), project
+		With the high-budget mode, minimize the aging-induced change in squared
+		distance to recent raw-shade means among zero-cost pairs.
+
+		Otherwise, if any pair has zero embarrassment (shade gap <= 6), project
 		tomorrow's tracked distribution for each such pair: worn socks return
 		aged and all leftovers return unchanged. Pick the free pair with the
 		smallest resulting sum of black + white std. If every pair has positive
@@ -209,6 +223,21 @@ class Player2(BasePlayer):
 				),
 			)
 			return best['pair']
+
+		if self.use_raw_variance:
+
+			def spread_change(candidate):
+				change = 0.0
+				for shade in candidate['shades']:
+					history = self.raw_history[colour_of(shade)]
+					center = sum(history) / len(history)
+					change += (aged_shade(shade) - center) ** 2 - (shade - center) ** 2
+				return change
+
+			return min(
+				free_pairs,
+				key=lambda p: (spread_change(p), abs(p['shades'][0] - p['shades'][1]), p['pair']),
+			)['pair']
 
 		best_pair: tuple[int, int] | None = None
 		best_key: tuple[float, int, tuple[int, int]] | None = None

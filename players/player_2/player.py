@@ -13,16 +13,19 @@ from collections import deque
 from itertools import combinations
 from math import ceil, sqrt
 from statistics import mean
+from typing import NamedTuple
 
-from core.engine import PACK_COST, PACK_SIZE
+from core.engine import HOLE_PROBABILITY, PACK_COST, PACK_SIZE
 from models.player import GameContext, PlayerSnapshot, Selection, TurnContext
 from models.player import Player as BasePlayer
 
 # Shade semantics, mirrored from models/sock.py. A shade above BLACK_CEILING is
 # a white sock and a shade at or below it is a black one; the ranges never
 # overlap, so colour can be inferred from shade without ambiguity.
+WHITE_START = 255
 WHITE_FLOOR = 127
 WHITE_FADE = 2
+BLACK_START = 0
 BLACK_CEILING = 64
 BLACK_FADE = 1
 
@@ -48,13 +51,29 @@ def pair_embarrassment(a: int, b: int, threshold: int) -> float:
 
 def expected_remaining_wears(shade: float) -> float:
 	"""Expected useful wears remaining for a sock with this observed shade."""
-	terminal_wears = 1.0 / 0.25  # terminal socks survive 4 wears in expectation
+	# A fully faded sock gets a hole with probability HOLE_PROBABILITY per wear,
+	# so it survives 1 / 0.25 = 4 more wears in expectation.
+	terminal_wears = 1.0 / HOLE_PROBABILITY
 	if colour_of(int(shade)) == WHITE:
 		return (shade - WHITE_FLOOR) / WHITE_FADE + terminal_wears
 	return BLACK_CEILING - shade + terminal_wears
 
 
-EXPECTED_FRESH_WEAR_LIFETIME = 68.0
+# 68 for either colour: 64 fading wears plus 4 terminal ones.
+EXPECTED_FRESH_WEAR_LIFETIME = expected_remaining_wears(WHITE_START)
+
+
+class Pair(NamedTuple):
+	"""Two of today's offered socks and the embarrassment of wearing them."""
+
+	indices: tuple[int, int]  # positions in 'offered'
+	shades: tuple[int, int]
+	embarrassment: float
+
+	@property
+	def gap(self) -> int:
+		"""How far apart the two shades are."""
+		return abs(self.shades[0] - self.shades[1])
 
 
 class WindowedStats:
@@ -122,22 +141,17 @@ class Player2(BasePlayer):
 		# If, for whatever reason, we want to reason about other embarrassment thresholds
 		self.embarrassment_threshold = 6
 
-		# Used for breaking ties of multiple zero-cost pairs
-		# We project what the shade distribution will look like post-action for each pair
-		# How many of the most recently returned shades per colour the projected spread covers.
+		# Mean/std of the last 5 socks we put back, per colour (worn ones at their
+		# faded shade). Used to break ties between zero-cost pairs.
 		self.running_window_size = 5
-
-		# Per-colour running mean/std of the socks we put back; drives choosing wear socks
-		# Note: the ones we wear will be added at their *aged* shade
 		self.stats: dict[str, WindowedStats] = {
 			WHITE: WindowedStats(self.running_window_size),
 			BLACK: WindowedStats(self.running_window_size),
 		}
 
-		# The raw shades actually offered to us (used in discard policy)
-		# How many recent offered shades per colour we remember (5 in high-budget mode).
+		# The last 20 shades offered to us, per colour (5 in high-budget mode).
+		# Used for discards, the money reserve and high-budget pair choice.
 		self.raw_window_size = 20
-		# Per-colour offered shades; drives discards, lifetimes and high-budget pair choice.
 		self.raw_history: dict[str, deque[float]] = {
 			WHITE: deque(maxlen=self.raw_window_size),
 			BLACK: deque(maxlen=self.raw_window_size),
@@ -146,7 +160,7 @@ class Player2(BasePlayer):
 		# Discard policy knobs.
 		# Fewest observed shades of a colour before we will discard a sock of that colour.
 		self.min_dist_samples = 3
-		# Most socks we discard in one day: 1 with 5-sock hands, 2 with 4-sock hands.
+		# Most socks we discard in one day: 1 with 5+ sock hands, 2 with 4-sock hands.
 		self.max_discards = 1 if self.selection_unit >= 5 else 2
 		# A pristine replacement must cut the sock's mean embarrassment by more than this.
 		self.replacement_gain_threshold = 6.0
@@ -156,12 +170,14 @@ class Player2(BasePlayer):
 		self.reserve_safety_packs = 6
 		# How far budget-left fraction must exceed days-left fraction before we discard.
 		self.budget_pace_margin = 0
-		# Turns played so far; used
-		self.days_seen = 0
+		# High-budget mode: 4-sock hands with at least this much budget use a
+		# shorter raw window and a different zero-cost tie-break.
+		self.high_budget_threshold = 400
+		self.high_budget_raw_window = 5
 		# Set on day 0: True if we can actually enter high budget mode
 		self.high_budget_mode = False
-		# Set on day 0: infer original budget from turn 0 spent + remaining
-		self.initial_budget = float('inf')
+		# Budget at the start of the game (inf if no limit). None until our first turn.
+		self.initial_budget: float | None = None
 
 	# ------------------------------------------------------------------ policy
 
@@ -170,7 +186,7 @@ class Player2(BasePlayer):
 
 		Args:
 			offered: The socks' shades drawn for us today.
-			turn: we extract 'day', 'total_spent', and 'budget_remaining
+			turn: we extract 'day', 'total_spent', and 'budget_remaining'
 
 		Returns:
 			'Selection(wear, discard)'
@@ -181,14 +197,15 @@ class Player2(BasePlayer):
 			- Every offered shade is added to 'raw_history' before any decision
 		"""
 		# One time basic setup at day 0; since "turn" variable is not available in constructor
-		if self.days_seen == 0:
+		if self.initial_budget is None:
 			self.initial_budget = turn.total_spent + turn.budget_remaining
-			self.high_budget_mode = self.selection_unit == 4 and self.initial_budget >= 400
+			self.high_budget_mode = (
+				self.selection_unit == 4 and self.initial_budget >= self.high_budget_threshold
+			)
 			if self.high_budget_mode:
-				self.raw_window_size = 5  # We pick a more aggressive window size of 5 (shorter memory)
-				self.raw_history = {c: deque(maxlen=5) for c in self.raw_history}
+				self.raw_window_size = self.high_budget_raw_window  # shorter memory
+				self.raw_history = {c: deque(maxlen=self.raw_window_size) for c in self.raw_history}
 
-		self.days_seen += 1
 		# Update the raw history with every shade we've observed just now
 		for shade in offered:
 			self.raw_history[colour_of(shade)].append(float(shade))
@@ -196,17 +213,16 @@ class Player2(BasePlayer):
 		wear = self.choose_pair(offered, pairs)
 		leftovers = [i for i in range(len(offered)) if i not in wear]
 		discard = self.choose_discards(offered, wear, leftovers, turn)
-		# Commit the chosen action to the real distribution; Bookkeeping: track socks we wore + put back + discarded; modifies self.stats
+		# Remember what we put back in the drawer today (updates self.stats)
 		self.record_returns(self.stats, offered, wear, leftovers, discard)
 		return Selection(wear=wear, discard=discard)
 
-	def choose_pair(self, offered: tuple[int, ...], pairs: list[dict]) -> tuple[int, int]:
+	def choose_pair(self, offered: tuple[int, ...], pairs: list[Pair]) -> tuple[int, int]:
 		"""Choose which two of today's socks to wear.
 
 		Args:
 			offered: The socks' shades drawn for us today.
-			pairs: Every pair of 'offered' with its 'pair' indices, 'shades'
-				and 'embarrassment', from 'pairwise_sock_embarrassments'.
+			pairs: Every 'Pair' of 'offered', from 'pairwise_sock_embarrassments'.
 
 		Returns:
 			The '(i, j)' indices into 'offered' of the pair to wear.
@@ -215,88 +231,79 @@ class Player2(BasePlayer):
 			- If no pair is free (every shade gap > 6), wear the pair with the
 				smallest embarrassment (greedy selection)
 			- Otherwise, score each free pair and wear the lowest score:
-				- High-budget mode: how much washing moves the two socks away
-					from their colour's mean recent offered shade, i.e. the sum of
-					'(aged - mean)^2 - (shade - mean)^2'. Negative means the wash
-					pulls the socks back toward typical, so outliers get worn.
-				- Normal mode: project tomorrow's 'stats' (worn pair aged, the
-					rest returned unchanged, no discards) and take the white +
-					black std, i.e. how tightly the returned shades cluster.
+				- High-budget mode: 'distance_from_average_after_wearing'
+				- Normal mode: 'drawer_spread_after_wearing'
 			- Ties break by the pair's own shade gap, then by lower indices.
 		"""
 
-		# Compute which pairs yielded 0 embarrassment
-		free_pairs = [p for p in pairs if p['embarrassment'] == 0.0]
+		free_pairs = [p for p in pairs if p.embarrassment == 0.0]
 
 		# If there weren't any free pairs, we greedily pick the pair with the smallest embarrassment
 		if not free_pairs:
-			return min(pairs, key=lambda p: p['embarrassment'])['pair']
+			return min(pairs, key=lambda p: p.embarrassment).indices
 
-		# Among the free pairs, we find the best pair
-		best_pair: tuple[int, int] | None = None
-		best_key: tuple[float, int, tuple[int, int]] | None = None
+		# How we score a free pair (lower is better) depends on the mode
+		if self.high_budget_mode:
+			score = self.distance_from_average_after_wearing
+		else:
+			score = self.drawer_spread_after_wearing
 
-		for candidate in free_pairs:
-			# Pair we're considering
-			wear = candidate['pair']
+		# Break ties by score, then the pair's own shade gap (every free pair
+		# has zero embarrassment, so the gap is what differs), then lower indices.
+		def rank(candidate: Pair):
+			return (score(offered, candidate), candidate.gap, candidate.indices)
 
-			if self.high_budget_mode:
-				# Add up how much wearing this pair moves each sock away from its color's
-				# typical shade
-				# Note: negative score = the wash pulls the socks closer to typical
-				score = 0.0
+		return min(free_pairs, key=rank).indices
 
-				for shade in candidate['shades']:
-					# The recently offered shades of this color
-					history = self.raw_history[colour_of(shade)]
+	def distance_from_average_after_wearing(
+		self, offered: tuple[int, ...], candidate: Pair
+	) -> float:
+		"""High-budget score: does wearing this pair fade it toward or away from typical?
 
-					# the mean shade of this color
-					center = mean(history)
+		For each sock, compare its squared distance from the mean recent offered
+		shade of its colour after washing vs. now. Negative means the wash pulls
+		the socks back toward typical, so outliers get worn. 'offered' is unused
+		but kept so both scores can be called the same way.
+		"""
+		score = 0.0
 
-					# squared distance of this sock from its color's mean, currently
-					distance_now = (shade - center) ** 2
+		for shade in candidate.shades:
+			# the mean shade of the recently offered socks of this color
+			center = mean(self.raw_history[colour_of(shade)])
 
-					# squared distance of this sock from its color's mean, if we were to wear it
-					distance_after_wash = (aged_shade(shade) - center) ** 2
+			# squared distance of this sock from its color's mean, now and if we wore it
+			distance_now = (shade - center) ** 2
+			distance_after_wash = (aged_shade(shade) - center) ** 2
 
-					# how much the spread changes after wearing this sock
-					# Recall: negative means wearing this sock makes the spread less (good)
-					score += distance_after_wash - distance_now
+			# Recall: negative means wearing this sock makes the spread less (good)
+			score += distance_after_wash - distance_now
 
-			# Not in high budget mode
-			else:
-				# The leftovers go back unworn
-				leftovers = [i for i in range(len(offered)) if i not in wear]
+		return score
 
-				# Copy our stats (want real ones to stay untouched)
-				trial = {color: window_stats.copy() for color, window_stats in self.stats.items()}
+	def drawer_spread_after_wearing(self, offered: tuple[int, ...], candidate: Pair) -> float:
+		"""Normal-mode score: how spread out the socks we put back would be.
 
-				# Project tomorrow's stats based on wearing these socks and leaving the rest
-				# Note: no discards yet, hence discard=()
-				self.record_returns(
-					stats=trial,
-					offered=offered,
-					wear=wear,
-					leftovers=leftovers,
-					discard=(),
-				)
+		Projects tomorrow's 'stats' as if we wore this pair (aged) and returned
+		the rest unchanged, then adds the white and black std.
+		"""
+		wear = candidate.indices
 
-				# The score for this worn pair is how spread out white
-				# and black shades would be afterwards, measured via std.
-				score = sum(window_stats.std for window_stats in trial.values())
+		# The leftovers go back unworn
+		leftovers = [i for i in range(len(offered)) if i not in wear]
 
-			# Break ties by score, then the pair's own shade gap (every free pair
-			# has zero embarrassment, so the gap is what differs), then lower indices.
-			gap = abs(candidate['shades'][0] - candidate['shades'][1])
-			key = (score, gap, wear)
+		# Copy our stats (want real ones to stay untouched)
+		trial = {color: window_stats.copy() for color, window_stats in self.stats.items()}
 
-			# Keep the first candidate with the smallest key.
-			if best_key is None or key < best_key:
-				best_key = key
-				best_pair = wear
+		# Project tomorrow's stats; no discards yet, hence discard=()
+		self.record_returns(
+			stats=trial,
+			offered=offered,
+			wear=wear,
+			leftovers=leftovers,
+			discard=(),
+		)
 
-		assert best_pair is not None
-		return best_pair
+		return sum(window_stats.std for window_stats in trial.values())
 
 	def estimated_replacement_reserve(self, turn: TurnContext, lost_wears: float = 0.0) -> float:
 		"""Estimate how much money to hold back for future replacement packs.
@@ -333,7 +340,6 @@ class Player2(BasePlayer):
 		wears_available = 0.0
 
 		for color in (WHITE, BLACK):
-			# The recently offered shades of this color
 			history = self.raw_history[color]
 
 			# Average wears left in a sock of this color
@@ -361,7 +367,6 @@ class Player2(BasePlayer):
 
 	def can_discard(self, turn: TurnContext) -> bool:
 		"""Whether replacement reserve and budget pace permit a discard."""
-		# Five-sock hands use a separately tuned discard limit.
 		if turn.budget_remaining < PACK_COST:
 			return False
 
@@ -370,8 +375,6 @@ class Player2(BasePlayer):
 
 		if self.initial_budget == float('inf'):
 			return True
-		if self.initial_budget <= 0:
-			return False
 
 		budget_fraction = turn.budget_remaining / self.initial_budget
 		time_fraction = max(0.0, (self.days - turn.day) / self.days)
@@ -415,10 +418,7 @@ class Player2(BasePlayer):
 		candidates = []
 
 		for i in leftovers:
-			# Sock we're considering
 			shade = offered[i]
-
-			# The recently offered shades of this color
 			history = self.raw_history[colour_of(shade)]
 
 			# Too few shades seen to judge this color yet
@@ -426,7 +426,7 @@ class Player2(BasePlayer):
 				continue
 
 			# The shade of a brand-new sock of this color
-			pristine = 255 if colour_of(shade) == WHITE else 0
+			pristine = WHITE_START if colour_of(shade) == WHITE else BLACK_START
 
 			# For each recent shade, how much less embarrassing pairing with it
 			# would be if this sock were replaced by a pristine one
@@ -434,9 +434,7 @@ class Player2(BasePlayer):
 
 			for other in history:
 				# embarrassment of pairing this sock with the recent shade
-				embarrassment_now = pair_embarrassment(
-					shade, other, self.embarrassment_threshold
-				)
+				embarrassment_now = pair_embarrassment(shade, other, self.embarrassment_threshold)
 
 				# embarrassment of pairing a pristine sock with the recent shade
 				embarrassment_if_replaced = pair_embarrassment(
@@ -462,7 +460,6 @@ class Player2(BasePlayer):
 		lost_wears = 0.0
 
 		for candidate in sorted(candidates, key=rank):
-			# Sock we're considering
 			i = candidate['index']
 
 			# Wears we'd lose by throwing out this sock, on top of those already chosen
@@ -472,7 +469,6 @@ class Player2(BasePlayer):
 			if turn.budget_remaining < self.estimated_replacement_reserve(turn, proposed_loss):
 				continue
 
-			# Keep it
 			discard.append(i)
 			lost_wears = proposed_loss
 
@@ -505,16 +501,16 @@ class Player2(BasePlayer):
 			stats[colour_of(offered[i])].add(offered[i])
 
 
-def pairwise_sock_embarrassments(offered: tuple[int, ...], threshold: int) -> list[dict]:
+def pairwise_sock_embarrassments(offered: tuple[int, ...], threshold: int) -> list[Pair]:
 	"""Every unordered pair of indices in ``offered`` with its shades and the
 	embarrassment cost of wearing it."""
 	results = []
 	for i, j in combinations(range(len(offered)), 2):
 		results.append(
-			{
-				'pair': (i, j),
-				'shades': (offered[i], offered[j]),
-				'embarrassment': pair_embarrassment(offered[i], offered[j], threshold),
-			}
+			Pair(
+				indices=(i, j),
+				shades=(offered[i], offered[j]),
+				embarrassment=pair_embarrassment(offered[i], offered[j], threshold),
+			)
 		)
 	return results

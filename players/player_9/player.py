@@ -13,6 +13,7 @@ This directory is not itself discovered - the registry only matches
 ``player_<digits>`` - so the template can never appear in a run as a competitor.
 """
 
+from core.engine import PACK_COST, PACK_SIZE
 from models.player import GameContext, PlayerSnapshot, Selection, TurnContext
 from models.player import Player as BasePlayer
 from models.sock import BLACK_CEILING, WHITE_FADE, WHITE_START
@@ -30,7 +31,7 @@ class Player9(BudgetMethods, PairingMethods, DiscardMethods, BasePlayer):
 
 		# super() has already set these from ctx and snapshot:
 		#
-		#   self.index           which roommate you are (0-based)
+		#   self.index           which roommate you are (0-based))
 		#   self.id              your UUID, stable for the whole simulation
 		#   self.capacity        C, the drawer size at the start
 		#   self.roommates       n, how many of you share the drawer
@@ -49,6 +50,8 @@ class Player9(BudgetMethods, PairingMethods, DiscardMethods, BasePlayer):
 		self.broke = False
 		self.no_budget = False
 		self.low_budget = False
+		self.discard_high = 0
+		self.mixed_mode = False
 
 	def is_black(self, shade: int) -> bool:
 		return shade <= BLACK_CEILING
@@ -69,12 +72,53 @@ class Player9(BudgetMethods, PairingMethods, DiscardMethods, BasePlayer):
 			self.capacity / self.roommates / self.selection_unit / self.days
 		"""
 
+		def wears(sock):
+			if not self.is_black(sock):
+				return (255 - sock) // 2
+			return sock
+
 		SPPPD, projected_error = self._update_budget(turn)
+
+		affordable_socks = PACK_SIZE / PACK_COST * max(0, turn.budget_remaining)
+		required_age = 2 * self.roommates * self.days_remaining / (self.capacity + affordable_socks)
+		proposed_high = 4 * round((self.capacity / 2 + required_age) / 4)
+		proposed_high = max(40, min(64, proposed_high))
+
+		# Raise the cutoff if the budget becomes less adequate, but never lower it.
+		self.discard_high = max(self.discard_high, proposed_high)
+		discard_low = self.discard_high // 2
+
+		if turn.day == 60 and turn.total_spent >= 10:
+			self.mixed_mode = True
 
 		# picking socks to wear
 		left, right = self._choose_wear(offered)
 
-		self._adjust_budget(turn, SPPPD, projected_error)
+		minW, minB, maxW, maxB = 0, 0, 0, 0
+
+		for sock in offered:
+			if self.is_black(sock):
+				minB = min(minB, wears(sock))
+				maxB = max(maxB, wears(sock))
+			else:
+				minW = min(minW, wears(sock))
+				maxB = max(maxW, wears(sock))
+
+		if max(maxB - minB, maxW - minW) > self.discard_high:
+			self.black_bound = (maxB + minB) // 2
+			self.white_bound = 255 - (minW + maxW)
+
+		if max(maxB - minB, maxW - minW) < discard_low:
+			self.black_bound = 65
+			self.white_bound = 100
+
+		if max(maxW, maxB) > 63:
+			self.black_bound = 32
+			self.white_bound = 192
+
+		if turn.budget_remaining <= max(self.budget_by_day[0] * (0.05), 20):
+			self.black_bound = 65
+			self.white_bound = 100
 
 		dis = self._choose_discards(offered, left, right)
 

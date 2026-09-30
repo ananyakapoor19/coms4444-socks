@@ -210,6 +210,35 @@ class Player1(BasePlayer):
 		drawer_life = 32.0 * self.capacity / (self.roommates * self.days)
 		return per_roommate_day >= 0.35 or (drawer_life >= 0.5 and per_roommate_day >= 0.12)
 
+	def is_tight(self) -> bool:
+		# returns True when a budget can't cover worn holes plus discarding worn socks early
+		if self.total_budget == float('inf'):
+			return False
+		n, C, days = self.roommates, self.capacity, self.days
+		budget = (self.total_budget // PACK_COST) * PACK_COST
+		sock_price = PACK_COST / PACK_SIZE
+		total_wears = 2.0 * n * days
+
+		# Cost of replacing socks that get holes.
+		if total_wears < 63.0 * C:  # the drawer never wears out
+			holes_cost = 0.0
+		else:
+			# 68 is 64 wears + 4 for the 75% chance a sock doesn't wear out.
+			# .4 * C is an estimation of socks left in the drawer in tight situations. It accounts for the difference in socks we start with in the drawer to the final drawer
+			socks_replaced = total_wears / 68.0 - 0.4 * C
+			# - 8.0 accounts for socks in the bin that will never be bought.
+			holes_cost = max(0.0, sock_price * socks_replaced - 8.0)
+
+		left_after_holes = budget - holes_cost
+
+		# Cost of throwing out socks as soon as they reach their cap.
+		# The diff between 1/64.5(instant throw away after 64 wears) instead of 68.0 (going until they hit the 25% chance)
+		capped_cost = sock_price * total_wears * (1.0 / 64.5 - 1.0 / 68.0)
+		left_after_capped = left_after_holes - capped_cost
+
+		# If budget for less than one pack of socks is left, there is a tight budget.
+		return left_after_capped < PACK_COST
+
 	def estimate_age(self, colored_socks, previous_age, previous_range, multiplier):
 		# Estimate roommates (-1 because we did not pick color) * 2 (pick 2) / 2 (assume half pick each color) / half-capacity (population of each color)
 		picked_by_roommates = (self.roommates - 1) * 2 / 2
@@ -427,10 +456,14 @@ class Player1(BasePlayer):
 
 		discard = []
 		threshold = self.calculate_discard_threshold(turn)
+		# When money is tight, keep capped socks until they get holes
+		keep_capped = self.is_tight()
 
 		for c in range(len(offered)):
 			if c not in selected_pair:
 				days_worn = self.get_days_worn(offered[c])
+				if keep_capped and days_worn >= LIFETIME:
+					continue
 
 				discard_probability = self.dynamic_discard_probability_method(days_worn, threshold)
 				if self.rng.random() < discard_probability:

@@ -29,6 +29,14 @@ PACK_SIZE = 6
 FLOOR = 6.0
 # Above the 64-wear maximum, so nothing qualifies.
 NEVER = 65.0
+# Most extra embarrassment catch-up pairing pays to wear the freshest pair.
+CATCHUP_COST = 10.0
+
+
+def pair_cost(a: int, b: int) -> float:
+	# Cost of a pair of socks
+	diff = abs(a - b)
+	return float(diff) if diff > 6 else 0.0
 
 class Player1(BasePlayer):
 	MIN_THRESHOLD = 6
@@ -64,7 +72,8 @@ class Player1(BasePlayer):
 		self.set_base_discard_probability_method = self.set_base_discard_probability_sigmoid
 		self.dynamic_discard_probability_method = self.calculate_dynamic_discard_probability_linear
 
-		random.seed(self.SEED)
+		# Safe random generator, and reseeds so 2 of our players don't share a random factor.
+		self.rng = random.Random(self.SEED + self.index)
 
 		self.black_avg = 0
 		self.black_range = 0
@@ -185,9 +194,19 @@ class Player1(BasePlayer):
 		return (255 - shade) / 2 if shade > 64 else float(shade)
 
 	def is_well_clustered(self, turn: TurnContext) -> bool:
-		if turn.budget_remaining != float('inf'):
-			return self.total_budget == turn.budget_remaining
-		return False
+		# Added is_rich check so we don't wait for another team to spend when budget is high.
+		if turn.budget_remaining == float('inf') or self.is_rich():
+			return False
+		return self.total_budget == turn.budget_remaining
+
+	def is_rich(self) -> bool:
+		# checks if budget per roommate per day is > 0.35
+		# Or if budget per roommate per day is > 0.12 and the drawer would last half the sim with no buys.
+		budget = (self.total_budget // PACK_COST) * PACK_COST
+		per_roommate_day = budget / (self.roommates * self.days)
+		# How long drawer would last with no spending
+		drawer_life = 32.0 * self.capacity / (self.roommates * self.days)
+		return per_roommate_day >= 0.35 or (drawer_life >= 0.5 and per_roommate_day >= 0.12)
 
 	def estimate_age(self, colored_socks, previous_age, previous_range, multiplier):
 		# Estimate roommates (-1 because we did not pick color) * 2 (pick 2) / 2 (assume half pick each color) / half-capacity (population of each color)
@@ -244,26 +263,55 @@ class Player1(BasePlayer):
 	def well_clustered_selection(
 		self, by_shade: list[tuple[int, int]], wear_scores: list[float], turn: TurnContext
 	) -> Selection:
-		(darkest, darkest_i), (dark_next, dark_next_i) = by_shade[0], by_shade[1]
-		(light_next, light_next_i), (lightest, lightest_i) = by_shade[-2], by_shade[-1]
+		"""
+		Returns the freshest free pair,
+		then a fresh free pair within 10 of each other
+		then a non fresh free pair
+		last returns the option with least pair_cost.
+		"""
+		# create shade that holds sock shade at a given index.
+		shade = [0] * len(by_shade)
+		for s, i in by_shade:
+			shade[i] = s
+		idx = range(len(shade))
 
-		dark_pair = (darkest_i, dark_next_i)
-		light_pair = (light_next_i, lightest_i)
-		dark_diff = dark_next - darkest
-		light_diff = lightest - light_next
-		dark_free = dark_diff <= 6
-		light_free = light_diff <= 6
+		# Loops through twice, checking for black socks, then white socks.
+		fresh = []
+		for white in (False, True):
+			# creates an array of a single color of socks, sorted by wear scores
+			color = sorted((i for i in idx if (shade[i] > 64) == white), key=lambda i: (wear_scores[i], i))
+			#  If there is a pair, add the cost of the freshest pair to fresh
+			if len(color) >= 2:
+				pair = (color[0], color[1])
+				fresh.append((pair_cost(shade[pair[0]], shade[pair[1]]), wear_scores[pair[0]], pair))
+    # check if any of the pairs in fresh are free
+		free = [f for f in fresh if f[0] == 0]
+		if free:
+			# return the freshest pair in free array.
+			return Selection(wear=min(free, key=lambda f: f[1])[2])
 
-		if dark_free and light_free:
-			pair = dark_pair if wear_scores[darkest_i] <= wear_scores[lightest_i] else light_pair
-		elif dark_free:
-			pair = dark_pair
-		elif light_free:
-			pair = light_pair
-		else:
-			pair = dark_pair if dark_diff <= light_diff else light_pair
+		# create an array of pair indexes.
+		pairs = [(i, j) for i in idx for j in idx if i < j]
 
-		return Selection(wear=pair)
+		# Check all pairing of socks free options. Select the free pair with fewest wears.
+		newest_free = min(
+			(p for p in pairs if pair_cost(shade[p[0]], shade[p[1]]) == 0),
+			key=lambda p: (wear_scores[p[0]] + wear_scores[p[1]], p),
+			default=None,
+		)
+  
+		# If nothing is free, return the lowest cost pair, wear score breaks ties. 
+		if newest_free is None:
+			cheapest = min(
+				pairs,
+				key=lambda p: (pair_cost(shade[p[0]], shade[p[1]]), wear_scores[p[0]] + wear_scores[p[1]], p),
+			)
+			return Selection(wear=cheapest)
+		# catch is the lowest pair_cost of the fresh socks, and lower wear as a tiebreak.
+		catch = min(fresh, key=lambda f: (f[0], f[1]))
+		# Returns the freshest pair, if its cost is less than 10 (hard coded catchup_cost). 
+		# Else returns the free pair. 
+		return Selection(wear=catch[2] if catch[0] <= CATCHUP_COST else newest_free)
 
 	# calculate a threshold for sock discard policy 
 	# return in number of days, the threshold over which socks need to be discarded 
@@ -278,7 +326,7 @@ class Player1(BasePlayer):
 		)
 		runway_threshold = self.choose_discard_threshold_runway(turn)
 
-		raw_threshold = min(raw_threshold if random.random() < 0.5 else runway_threshold, self.MAX_THRESHOLD)
+		raw_threshold = min(raw_threshold if self.rng.random() < 0.5 else runway_threshold, self.MAX_THRESHOLD)
 
 		# smoother threshold 
 		if len(self.threshold_history) >= self.THRESHOLD_AVG_N:
@@ -305,7 +353,7 @@ class Player1(BasePlayer):
 			if c not in selected_pair \
 				and offered[c] >= threshold \
 				and offered[c] <= (255 - threshold * 2) \
-				and random.random() < self.discard_probability:
+				and self.rng.random() < self.discard_probability:
 				discard.append(c)
 		return tuple(discard)
 
@@ -362,7 +410,7 @@ class Player1(BasePlayer):
 			offered: tuple[int, ...], 
 			turn: TurnContext, 
 			selected_pair: tuple[int, ...]) -> tuple[int, ...]:
-		if self.is_well_clustered(turn) or turn.budget_remaining <= 0:
+		if self.is_well_clustered(turn) or turn.budget_remaining < PACK_COST:
 			return tuple([])
 
 		
@@ -374,7 +422,7 @@ class Player1(BasePlayer):
 				days_worn = self.get_days_worn(offered[c])
 				
 				discard_probability = self.dynamic_discard_probability_method(days_worn, threshold)
-				if random.random() < discard_probability:
+				if self.rng.random() < discard_probability:
 					discard.append(c)
 		return tuple(discard)
 

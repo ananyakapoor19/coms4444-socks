@@ -127,7 +127,10 @@ class Player8(BasePlayer):
 	# The drawer changes as roommates wear and replace socks. A short effective
 	# memory follows the current cohorts better than a long historical average.
 	history_decay = 0.75
-	maximum_discards_per_turn = 2
+	cohort_spread_threshold = 2.0
+	# Experimental crowding rule: protect a tight age cohort from discards when
+	# daily offers consume at least this fraction of the drawer.
+	cohort_guard_load_threshold: float | None = 0.25
 	future_mismatch_weight = 0.5
 	replacement_money_weight = 2.0
 	discard_credit_cap = 10.0
@@ -139,6 +142,7 @@ class Player8(BasePlayer):
 
 	def __init__(self, snapshot: PlayerSnapshot, ctx: GameContext) -> None:
 		super().__init__(snapshot, ctx)
+		self.maximum_discards_per_turn = max(0, self.selection_unit - 2)
 		self.history = SockHistory(decay=self.history_decay)
 		self.discard_credit = 0.0
 		self.estimated_discard_spend = 0.0
@@ -161,9 +165,9 @@ class Player8(BasePlayer):
 		)['indices']
 		worn = set(best_pair)
 		unworn = [i for i in range(n) if i not in worn]
-		if unworn and self._budget_guarantees_two_discards(turn):
+		if unworn and self._budget_guarantees_all_discards(turn):
 			# Even if both worn socks hole every day, this budget can pay for
-			# every possible pack. Use all two discard slots to refresh the pool.
+			# every possible pack. Discard all leftovers to refresh the pool.
 			self.estimated_household_replacements = 2.0 * self.roommates
 			costs = self._discard_costs(socks, unworn, 0.0, turn.day)
 			chosen = sorted(unworn, key=lambda index: (costs[index], -socks[index]['age'], index))[
@@ -183,10 +187,10 @@ class Player8(BasePlayer):
 		self.estimated_discard_spend += len(discard) * SOCK_PRICE
 		return Selection(wear=best_pair, discard=discard)
 
-	def _budget_guarantees_two_discards(self, turn: TurnContext) -> bool:
+	def _budget_guarantees_all_discards(self, turn: TurnContext) -> bool:
 		"""Can the starting budget buy every pack the entire game could need?
 
-		Our turn can discard at most two unworn socks and lose two worn socks
+		Our turn can discard every unworn sock and lose two worn socks
 		to holes. Each peer could discard every unworn sock and lose both worn
 		socks. Six discarded socks trigger at most one $10 purchase, regardless
 		of color. This worst-case bound covers all roommate strategies and days.
@@ -294,6 +298,30 @@ class Player8(BasePlayer):
 			forecast = forecasts[socks[index]['color']]
 			change = forecast[0] - forecast[socks[index]['age']]
 			costs[index] = money_weight * SOCK_PRICE + self.future_mismatch_weight * change
+
+		# When daily offers nearly fill the drawer, a tightly aged cohort is
+		# already easy to match. A fresh replacement can split that cohort.
+		spare_socks = self.capacity - self.selection_unit * self.roommates
+		if self.cohort_guard_load_threshold is None:
+			cohort_guard_active = spare_socks <= 2 * PACK_SIZE
+		else:
+			offer_load = self.selection_unit * self.roommates / self.capacity
+			cohort_guard_active = offer_load >= self.cohort_guard_load_threshold
+		if cohort_guard_active:
+			for color in {socks[index]['color'] for index in unworn}:
+				weights = self.history.age_weights(color)
+				total = sum(weights)
+				if not total:
+					continue
+				mean_age = sum(age * weight for age, weight in enumerate(weights)) / total
+				variance = (
+					sum(weight * (age - mean_age) ** 2 for age, weight in enumerate(weights))
+					/ total
+				)
+				if variance < self.cohort_spread_threshold**2:
+					for index in unworn:
+						if socks[index]['color'] == color:
+							costs[index] = float('inf')
 		return costs
 
 	@staticmethod

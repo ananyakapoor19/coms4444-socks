@@ -128,6 +128,9 @@ class Player8(BasePlayer):
 	# memory follows the current cohorts better than a long historical average.
 	history_decay = 0.75
 	cohort_spread_threshold = 2.0
+	# Experimental crowding rule: protect a tight age cohort from discards when
+	# daily offers consume at least this fraction of the drawer.
+	cohort_guard_load_threshold: float | None = 0.25
 	future_mismatch_weight = 0.5
 	replacement_money_weight = 2.0
 	discard_credit_cap = 10.0
@@ -299,7 +302,12 @@ class Player8(BasePlayer):
 		# When daily offers nearly fill the drawer, a tightly aged cohort is
 		# already easy to match. A fresh replacement can split that cohort.
 		spare_socks = self.capacity - self.selection_unit * self.roommates
-		if spare_socks <= 2 * PACK_SIZE:
+		if self.cohort_guard_load_threshold is None:
+			cohort_guard_active = spare_socks <= 2 * PACK_SIZE
+		else:
+			offer_load = self.selection_unit * self.roommates / self.capacity
+			cohort_guard_active = offer_load >= self.cohort_guard_load_threshold
+		if cohort_guard_active:
 			for color in {socks[index]['color'] for index in unworn}:
 				weights = self.history.age_weights(color)
 				total = sum(weights)

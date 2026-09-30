@@ -127,6 +127,7 @@ class Player8(BasePlayer):
 	# The drawer changes as roommates wear and replace socks. A short effective
 	# memory follows the current cohorts better than a long historical average.
 	history_decay = 0.75
+	cohort_spread_threshold = 2.0
 	future_mismatch_weight = 0.5
 	replacement_money_weight = 2.0
 	discard_credit_cap = 10.0
@@ -294,6 +295,25 @@ class Player8(BasePlayer):
 			forecast = forecasts[socks[index]['color']]
 			change = forecast[0] - forecast[socks[index]['age']]
 			costs[index] = money_weight * SOCK_PRICE + self.future_mismatch_weight * change
+
+		# When daily offers nearly fill the drawer, a tightly aged cohort is
+		# already easy to match. A fresh replacement can split that cohort.
+		spare_socks = self.capacity - self.selection_unit * self.roommates
+		if spare_socks <= 2 * PACK_SIZE:
+			for color in {socks[index]['color'] for index in unworn}:
+				weights = self.history.age_weights(color)
+				total = sum(weights)
+				if not total:
+					continue
+				mean_age = sum(age * weight for age, weight in enumerate(weights)) / total
+				variance = (
+					sum(weight * (age - mean_age) ** 2 for age, weight in enumerate(weights))
+					/ total
+				)
+				if variance < self.cohort_spread_threshold**2:
+					for index in unworn:
+						if socks[index]['color'] == color:
+							costs[index] = float('inf')
 		return costs
 
 	@staticmethod
